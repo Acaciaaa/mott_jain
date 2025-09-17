@@ -1,0 +1,80 @@
+include(joinpath(@__DIR__, ".", "KLcommon.jl"))
+using .KLcommon
+
+P = KLcommon.build_model(nmf=6)
+result = []
+for Z in [1, -1], R in [-1, 1]
+    bs = SBasis(cfs, [R, Z], qnf)
+    tms_hmt = KLcommon.make_hmt_terms(P,0.312)
+    en, st, L2v, C2v = KLcommon.eigs_with_obs(P, bs, tms_hmt; k=20)
+    for i in eachindex(en)
+    push!(result, round.([en[i], L2v[i], C2v[i]] .+ sqrt(eps(Float64)); digits=7))
+    end
+end
+
+sort!(result, by = st -> real(st[1]))
+enrg_0 = result[1][1]
+enrg_1 = (filter(st -> st[2] ≈ 6 && st[3] ≈ 0, result)[1][1] - enrg_0) / 3
+result_dim = [ [ (st[1] - enrg_0) / enrg_1 ; st] for st in result if st[2] < 12 ]
+display(permutedims(hcat(result_dim...)))
+
+# As a minimal example, in this code, we calibrate by setting Δ_T=3.
+# To calibrate by optimising conformality, replace Lines 69 with
+# enrg_cal = [
+#     filter(st -> st[2] ≈ 2 && st[3] ≈ 0, result)[1][1] - filter(st -> st[2] ≈ 0 && st[3] ≈ 0, result)[2][1], # ∂S - S
+#     filter(st -> st[2] ≈ 2 && st[3] ≈ 2, result)[1][1] - enrg_0, # J
+#     filter(st -> st[2] ≈ 2 && st[3] ≈ 2, result)[2][1] - enrg_0, # ϵ∂J
+#     filter(st -> st[2] ≈ 6 && st[3] ≈ 2, result)[1][1] - enrg_0, # ∂J
+#     filter(st -> st[2] ≈ 6 && st[3] ≈ 0, result)[1][1] - enrg_0 # T
+# ]
+# dim_cal = Float64[1, 2, 3, 3, 3]
+# enrg_1 = (enrg_cal' * dim_cal) / (dim_cal' * dim_cal)
+# result_dim 的结构: [Δ, E, L2, C2]
+# 其中 L2 ≈ l(l+1), C2 ≈ s(s+1)
+
+# result_dim: 每个元素是 [Δ, E, L2, C2]
+function plot_multiplets(result_dim::Vector{<:AbstractVector})
+    # 先解析出 (Δ, l, s)
+    Δs = Float64[]; ls = Int[]; ss = Int[]
+    for st in result_dim
+        Δ  = st[1]
+        l2 = round(Int, st[3])      # ~ l(l+1)
+        c2 = round(Int, st[4])      # ~ s(s+1)
+        l  = Int(round((-1 + sqrt(1 + 4l2)) / 2))
+        s  = Int(round((-1 + sqrt(1 + 4c2)) / 2))
+        push!(Δs, Δ); push!(ls, l); push!(ss, s)
+    end
+
+    # 按 s 分组
+    bys = Dict{Int, Vector{Int}}()
+    for (i, s) in enumerate(ss)
+        push!(get!(bys, s, Int[]), i)
+    end
+
+    # 颜色表（可扩展）
+    cmap = Dict(0 => :red, 1 => :green, 2 => :blue, 3 => :purple)
+
+    fig = Figure(size=(680, 600))
+    ax  = Axis(fig[1,1],
+        xlabel = "l (SO(3) spin)",
+        ylabel = "Δ (scaling dimension)",
+        title  = "CFT multiplet structure (colored by flavour spin s)"
+    )
+
+    # 每个 s 作为一个系列画，并加 label
+    for (s, idxs) in sort(collect(bys); by=first)  # s 从小到大
+        xs = [ls[i] for i in idxs]
+        ys = [Δs[i] for i in idxs]
+        col = get(cmap, s, :black)
+        scatter!(ax, xs, ys; color=col, markersize=10, label="s=$(s)")
+    end
+
+    axislegend(ax; position=:rt)
+
+    return fig
+end
+
+
+# === 用法 ===
+fig = plot_multiplets(result_dim)
+display(fig)
