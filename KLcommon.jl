@@ -1,5 +1,4 @@
 module KLcommon
-
 using FuzzifiED
 using FuzzifiED.Fuzzifino
 using LinearAlgebra
@@ -11,6 +10,7 @@ const ATOL = sqrt(eps(Float64))
 
 # —— 公共：按 nmf 构建模型参数（不把 μ 烧进来） ——
 Base.@kwdef mutable struct ModelParams
+    name::Symbol
     nmf::Int
     nff::Int
     nmb::Int
@@ -60,7 +60,8 @@ function build_model(; nmf::Int)
     tms_l2 = GetL2STerms(nmf, nff, nmb, nfb)
     tms_c2 = STerms(GetC2Terms(nmf, nff, :SU))
 
-    return ModelParams(; nmf, nff, nmb, nfb, nof, nob, qnd, qnf, cfs, tms_hop, tms_int, tms_l2, tms_c2)
+    return ModelParams(; name=:KL, nmf, nff, nmb, nfb, nof, nob, qnd, qnf, cfs, 
+    tms_hop, tms_int, tms_l2, tms_c2)
 end
 
 # —— 把 μ 拼进哈密顿量；IM 显式表示耦合到总费米数 ——
