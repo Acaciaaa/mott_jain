@@ -1,22 +1,38 @@
 include(joinpath(@__DIR__, ".", "KLcommon.jl"))
+include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
 using .KLcommon
-
-P = KLcommon.build_model(nmf=6)
+using .JAINcommon
+using FuzzifiED
+using FuzzifiED.Fuzzifino
+using LinearAlgebra
+using SpecialFunctions  # 如果需要 beta_inc 等
+using CairoMakie
 
 # ==== 3) 观测 <N_f> 与 平均占据 <n_f>=<N_f>/nmf ====
-function avg_nf_for_mu(μ::Float64)
-    bestst, bestbs, bestE, bestR, bestZ = KLcommon.ground_state(P, μ)
-    op_Nf  = SOperator(bestbs, STerms(GetPolTerms(P.nmf, P.nff)); red_q=1)  # 如果 GetPolTerms==N_f
-    Nf_exp = real(bestst' * op_Nf * bestst)
-    nf_avg = Nf_exp / nmf
-    return nf_avg, Nf_exp
+function avg_nf_for_mu(P, μ::Float64)
+    if P.name == :KL
+        bestst, bestbs, bestE, bestR, bestZ = KLcommon.ground_state(P, μ)
+        op_N  = SOperator(bestbs, STerms(GetPolTerms(P.nmf, P.nff)); red_q=1)  # 如果 GetPolTerms==N_f
+        N_exp = real(bestst' * op_N * bestst)
+        n_avg = N_exp / P.nmf
+    elseif P.name == :JAINsu2u1
+        bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, μ, 0.05)
+        op_N  = Operator(bestbs, GetPolTerms(P.nml, P.nfl); red_q=1)  # 如果 GetPolTerms==N_f
+        N_exp = real(bestst' * op_N * bestst)
+        n_avg = N_exp / P.nml
+    end
+    return n_avg, N_exp
 end
 
 # ==== 4) 扫 μ 并画图 ====
-mus = collect(range(-0.4, 0.6, length=10))
+#P = KLcommon.build_model(nmf=4)
+P = JAINcommon.build_model_su2u1(nml=4)
+μlower = -2.0
+μupper = 2.0
+mus = collect(range(μlower, μupper, length=40))
 nf_avg_list = Float64[]; Nf_list = Float64[]
 for μ in mus
-    nf_avg, Nf_tot = avg_nf_for_mu(μ)
+    nf_avg, Nf_tot = avg_nf_for_mu(P, μ)
     push!(nf_avg_list, nf_avg); push!(Nf_list, Nf_tot)
     @info "μ=$(round(μ,digits=3))  <n_f>≈$(round(nf_avg,digits=4))  <N_f>≈$(round(Nf_tot,digits=4))"
 end
@@ -27,7 +43,7 @@ ax  = Axis(fig[1, 1];
     ylabel = "⟨n_f⟩ per LLL orbital",
     title  = "Average fermion density vs μ",
     aspect = 1,                               # ← 轴面板变成正方形
-    limits = ((-0.4, 0.6), (0.0, 2.0))       # ← x,y 范围
+    limits = ((μlower, μupper), (-1.0, 4.0))       # ← x,y 范围
 )
 
 lines!(ax, mus, nf_avg_list, linewidth = 2)

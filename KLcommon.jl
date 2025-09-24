@@ -77,8 +77,9 @@ function ground_state(P::ModelParams, μ::Float64, k::Int=1)
         bs = SBasis(P.cfs, [R, Z], P.qnf)
         H  = SOperator(bs, tms_hmt)
         en, st = GetEigensystem(OpMat(H), k)
-        if en[1] < bestE
-            bestE, bestst, bestbs, bestR, bestZ = en[1], st[:,1], bs, R, Z
+        @assert abs(imag(en[1])) ≤ 1e-12 "eig has large Im part: $(en)"
+        if real(en[1]) < bestE
+            bestE, bestst, bestbs, bestR, bestZ = real(en[1]), st[:,1], bs, R, Z
         end
     end
     return bestst, bestbs, bestE, bestR, bestZ

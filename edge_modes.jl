@@ -2,6 +2,11 @@ include(joinpath(@__DIR__, ".", "KLcommon.jl"))
 include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
 using .KLcommon
 using .JAINcommon
+using FuzzifiED
+using FuzzifiED.Fuzzifino
+using LinearAlgebra
+using SpecialFunctions  # 如果需要 beta_inc 等
+using CairoMakie
 
 # -----------------------
 # 2) 赤道切割振幅 α_oa
@@ -174,11 +179,11 @@ function plot_edge_modes_selected(pts, QA_sel; deg=Int[], ymin=0.0, ymax=10.0)
 end
 
 # === 运行 ===
-#P = KLcommon.build_model(nmf=6)
-P = JAINcommon.build_model_su2u1(nml=6)
+P = KLcommon.build_model(nmf=4)
+#P = JAINcommon.build_model_su2u1(nml=4)
 pts, QA_sel = calculate_entanglement(P)
 ymin=0.0
 ymax=10.0
-# deg, lz_used = count_degeneracies_selected(pts; lz_range = -9:-5, ymin=ymin, ymax=ymax)
-# @info "Degeneracies for Lz=-9..-5, ξ∈($ymin,$ymax), QA=$QA_sel" lz_used deg
-display(plot_edge_modes_selected(pts, QA_sel; ymin=ymin, ymax=ymax))
+deg, lz_used = count_degeneracies_selected(pts; lz_range = -9:-5, ymin=ymin, ymax=ymax)
+@info "Degeneracies for Lz=-9..-5, ξ∈($ymin,$ymax), QA=$QA_sel" lz_used deg
+display(plot_edge_modes_selected(pts, QA_sel; deg=deg, ymin=ymin, ymax=ymax))
