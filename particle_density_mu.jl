@@ -17,9 +17,7 @@ function avg_nf_for_mu(P, μ::Float64)
         n_avg = N_exp / P.nmf
     elseif P.name == :JAINsu2u1
         bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, μ, 0.05)
-        #op_N  = Operator(bestbs, JAINcommon.GetPolTermsMixed(P.nm_vec, Diagonal([1.0, 1.0, 1.0, 0.0])); red_q=1)
-        op_N  = Operator(bestbs, JAINcommon.GetPolTermsMixed(P.nm_vec, Diagonal([1.0, 1.0, 0.0, 0.0])); red_q=1)
-        #op_N  = Operator(bestbs, JAINcommon.GetPolTermsMixed(P.nm_vec, Diagonal([0.0, 0.0, 1.0, 0.0])); red_q=1)
+        op_N  = Operator(bestbs, JAINcommon.GetPolTermsMixed(P.nm_vec, Diagonal([1.0, 1.0, 1.0, 0.0])); red_q=1)
         N_exp = real(bestst' * op_N * bestst)
         n_avg = N_exp / P.nml
     end
@@ -28,7 +26,7 @@ end
 
 # ==== 4) 扫 μ 并画图 ====
 #P = KLcommon.build_model(nmf=4)
-P = JAINcommon.build_model_su2u1(nml=4)
+P = JAINcommon.build_model_su2u1(nml=6)
 μlower = -2.0
 μupper = 2.0
 mus = collect(range(μlower, μupper, length=10))
