@@ -29,6 +29,7 @@ Base.@kwdef mutable struct ModelParams
     qnd
     qnf
     cfs
+    nm_vec
     tms_hop
     tms_int
     tms_br
@@ -81,20 +82,6 @@ function make_qnf_swap_and_roty(nml::Int, nmh::Int, no::Int)
     ]
 end
 
-"""
-    GetElectronObsMixed(nm_per_flavour::AbstractVector{<:Integer}, f::Int;
-                        offset0::Int=0, norm_r2::Float64=ObsNormRadSq) :: SphereObs
-
-按“每个 flavour 连续分块”的全局编号约定，返回第 `f` 个 flavour 的
-电子**湮灭**算符 ψ_f(Ω) 的球面展开（SphereObs）。
-
-- `nm_per_flavour`：各 flavour 的 LLL 轨道数向量，如 [nml, nml, nml, nmh]
-- `f`：flavour 下标（1 开始）
-- `offset0`：这个电子扇区在“全系统”中的起始全局偏移（1 基索引的前缀长度，默认接在最前）
-- `norm_r2`：R^2 归一化（与包一致；默认为 `ObsNormRadSq`）
-
-注意：产生算符用转置 `'` 获得，例如 `GetElectronObsMixed(..., f)'`。
-"""
 function GetElectronObsMixed(nm_per_flavour::AbstractVector{<:Integer}, f::Int;
                              offset0::Int=0, norm_r2::Float64=FuzzifiED.ObsNormRadSq)
     @assert 1 ≤ f ≤ length(nm_per_flavour)
@@ -117,23 +104,6 @@ function GetElectronObsMixed(nm_per_flavour::AbstractVector{<:Integer}, f::Int;
     return SphereObs(nmf - 1, nmf - 1, get_comp)  # s2 = l2m = nmf-1
 end
 
-"""
-    GetDensityObsMixed(nm_per_flavour::AbstractVector{<:Integer},
-                       mat::Union{Nothing,AbstractMatrix{<:Number}}=nothing;
-                       norm_r2::Float64=ObsNormRadSq,
-                       offset0::Int=0) :: SphereObs
-
-按“每个 flavour 连续分块”的全局编号约定，返回
-    n(Ω) = ∑_{f,f'} ψ_f^†(Ω) * M_{ff'} * ψ_{f'}(Ω)
-的 SphereObs 表示。
-
-- `nm_per_flavour`: 各 flavour 的 LLL 轨道数向量，如 [nml, nml, nml, nmh]
-- `mat`: 味空间矩阵 M（若为 `nothing` 则用单位阵）
-- `norm_r2`: R^2 归一化（与包一致；默认 `ObsNormRadSq`）
-- `offset0`: 这个电子扇区在“全系统”全局编号的起始偏移（若前面有其他粒子段时使用）
-
-注意：需要已有 `GetElectronObsMixed`（我们之前给过）。
-"""
 function GetDensityObsMixed(nm_per_flavour::AbstractVector{<:Integer},
                             mat::Union{Nothing,AbstractMatrix{<:Number}}=nothing;
                             norm_r2::Float64=FuzzifiED.ObsNormRadSq,
@@ -158,95 +128,36 @@ function GetDensityObsMixed(nm_per_flavour::AbstractVector{<:Integer},
     @inbounds for f1 in 1:nf, f2 in 1:nf
         c = M[f1, f2]
         if !(abs(c) < 1e-13)
-            obs += c * el'[f1] * el[f2]
+            obs += c * (el[f1])' * el[f2]
         end
     end
     return obs
 end
 
-
-"""
-    GetPolTermsMixed(nm_per_flavour::AbstractVector{<:Integer},
-                     M::Union{Nothing,AbstractMatrix{<:Number}}=nothing;
-                     fld_m_per_flavour::Union{Nothing,Vector{<:AbstractVector{<:Number}}}=nothing,
-                     offset0::Int=0) :: Terms
-
-混合 nm、按 flavour 连续分块的极化项：
-    ∑_{m,f,f'} h_m^{(f)} c†_{m f} M_{ff'} c_{m f'}
-
-- `nm_per_flavour`: 各 flavour 的 LLL 轨道数向量，如 [nml, nml, nml, nmh]
-- `M`: 味矩阵（nf×nf）。默认 `I`。
-- `fld_m_per_flavour`: 每个 flavour 的 m 层权重向量列表；默认各味全 1。
-  每个向量长度必须等于对应的 `nm_f`。
-- `offset0`: 若前面有其他粒子段（需整体平移电子段全局编号），给出它们的总长度。
-"""
 function GetPolTermsMixed(nm_per_flavour::AbstractVector{<:Integer},
-                          M::Union{Nothing,AbstractMatrix{<:Number}}=nothing;
-                          fld_m_per_flavour::Union{Nothing,Vector{<:AbstractVector{<:Number}}}=nothing,
-                          offset0::Int=0)
-
+                              Mdiag::Union{Nothing,AbstractVector{<:Number},AbstractMatrix{<:Number}}=nothing;
+                              offset0::Int=0)
     nf = length(nm_per_flavour)
-    bases0 = cumsum(vcat(0, nm_per_flavour[1:end-1]))  # 每味块 0-based 起点
-    bases  = offset0 .+ bases0                          # 加全局偏移
+    # 取对角权重向量 d
+    d = Mdiag === nothing ? ones(nf) :
+        isa(Mdiag, AbstractVector) ? Mdiag :
+        diag(Mdiag)
 
-    # 味矩阵
-    if M === nothing
-        M = Matrix{Float64}(I, nf, nf)
-    else
-        @assert size(M,1) == nf && size(M,2) == nf "size(M) must be nf×nf"
-    end
-
-    # m 层权重
-    if fld_m_per_flavour === nothing
-        fld_m_per_flavour = [ones(Float64, nm_per_flavour[f]) for f in 1:nf]
-    else
-        @assert length(fld_m_per_flavour) == nf "need fld_m_per_flavour for each flavour"
-        @inbounds for f in 1:nf
-            @assert length(fld_m_per_flavour[f]) == nm_per_flavour[f] "length(fld_m[$f]) must equal nm_per_flavour[$f]"
-        end
-    end
-
-    # 预存每味的 l2 = 2s = nm_f - 1
-    l2 = [nm_per_flavour[f] - 1 for f in 1:nf]
+    # 每个 flavour 的块起点(0-based)，再加全局偏移
+    bases = offset0 .+ cumsum(vcat(0, nm_per_flavour[1:end-1]))
 
     tms = Term[]
-    @inbounds for f1 in 1:nf
-        nm1  = nm_per_flavour[f1]
-        l21  = l2[f1]
-        base1 = bases[f1]
-        h1   = fld_m_per_flavour[f1]
-
-        # 枚举 f1 的每个 m 层：k1=0..nm1-1，对应 2m = -l21 + 2k1
-        for k1 in 0:nm1-1
-            m2val = -l21 + 2*k1
-            o1 = base1 + k1 + 1  # 全局 1-based 轨道号
-
-            # 与所有 f2 在“同一 m 层”耦合：需要该 m 层在 f2 中也存在
-            for f2 in 1:nf
-                coeff = M[f1, f2]
-                if !(abs(coeff) > 1e-13); continue; end
-
-                l22 = l2[f2]
-                # m 层存在性的充要条件：|2m| ≤ l22 且 (2m + l22) 为偶数（可整除 2）
-                if abs(m2val) <= l22 && iseven(m2val + l22)
-                    k2 = (m2val + l22) ÷ 2    # f2 中的层索引
-                    o2 = bases[f2] + k2 + 1
-                    push!(tms, Term(coeff * h1[k1+1], [1, o1, 0, o2]))  # c†_{o1} c_{o2}
-                end
-            end
+    @inbounds for f in 1:nf
+        c = d[f]
+        abs(c) < 1e-13 && continue
+        base = bases[f]
+        nmf  = nm_per_flavour[f]
+        for k in 0:nmf-1
+            oid = base + k + 1              # 1-based 轨道号
+            push!(tms, Term(c, [1, oid, 0, oid]))  # c†_{oid} c_{oid}
         end
     end
     return SimplifyTerms(tms)
-end
-
-# 便捷重载：对角 M（如 diag(a,b,c,d)）
-function GetPolTermsMixed(nm_per_flavour::AbstractVector{<:Integer},
-                          diagM::AbstractVector{<:Number};
-                          fld_m_per_flavour::Union{Nothing,Vector{<:AbstractVector{<:Number}}}=nothing,
-                          offset0::Int=0)
-    @assert length(diagM) == length(nm_per_flavour) "length(diagM) must equal nf"
-    return GetPolTermsMixed(nm_per_flavour, Diagonal(diagM);
-                            fld_m_per_flavour=fld_m_per_flavour, offset0=offset0)
 end
 
 
@@ -273,8 +184,6 @@ function build_model_su2u1(; nml::Int)
 
     cfs = Confs(no, [nol, 0, 0], qnd) 
 
-    shift = Dict(i => i + nol for i in 1:noh)
-
     nm_vec = [nml, nml, nml, nmh]              # 4 个 flavour 的 nm
     ψ1 = GetElectronObsMixed(nm_vec, 1)        # 轻 flavour 1 湮灭
     ψ2 = GetElectronObsMixed(nm_vec, 2)
@@ -285,16 +194,20 @@ function build_model_su2u1(; nml::Int)
     den_e = StoreComps(GetDensityObsMixed(nm_vec, Diagonal([1, 1, 1, 3])))
     tms_int = GetIntegral(den_e * den_e)
 
-    tms_br = GetPolTermsMixed(nm_vec, [1.0, 1.0, -2.0, 0.0])
-    tms_f123 = GetPolTermsMixed(nm_vec, [1.0, 1.0, 1.0, 0.0])
-    tms_f4 = GetPolTermsMixed(nm_vec, [0.0, 0.0, 0.0, 1.0])
+    tms_br = GetPolTermsMixed(nm_vec, Diagonal([1.0, 1.0, -2.0, 0.0]))
+    tms_f123 = GetPolTermsMixed(nm_vec, Diagonal([1.0, 1.0, 1.0, 0.0]))
+    tms_f4 = GetPolTermsMixed(nm_vec, Diagonal([0.0, 0.0, 0.0, 1.0]))
 
     # tms_l2 = GetL2Terms(nml, nfl) +
     #     RelabelOrbs(GetL2Terms(nmh, nfh), shift)
 
     # tms_c2 = GetC2Terms(nml, nfl, [Sx, Sy, Sz])
+    for (nm, t) in [(:tms_hop, tms_hop), (:tms_int, tms_int), (:tms_br, tms_br), (:tms_f123, tms_f123), (:tms_f4, tms_f4)]
+        Δ = SimplifyTerms(t - adjoint(t))
+        println(lpad(string(nm),10), ": ", isempty(Δ) ? "OK" : "NON-HERM")
+    end
 
-    return ModelParams(; name=:JAINsu2u1, nml, nfl, nol, nmh, nfh, noh, no, l2l, l2h, qnd, qnf, cfs, 
+    return ModelParams(; name=:JAINsu2u1, nml, nfl, nol, nmh, nfh, noh, no, l2l, l2h, qnd, qnf, cfs, nm_vec,
     tms_hop, tms_int, tms_br, tms_f123, tms_f4) #, tms_l2, tms_c2)
 end
 
@@ -305,21 +218,42 @@ make_hmt_su2u1(P::ModelParams; U::Float64=1.0, η::Float64=-0.5, μ123::Float64,
     + Δ * P.tms_br
 )
 
-function ground_state_su2u1(P::ModelParams, μ::Float64, Δ::Float64, k::Int=1)
-    tms_hmt = make_hmt_su2u1(P; U=1.0, η=-0.5, μ123=μ, μ4=0.0, Δ)
+function ground_state_su2u1(P::ModelParams, μ::Float64, Δ::Float64, k::Int=1;
+                            check_hermiticity::Bool=true,
+                            tol_rel::Float64=1e-12,
+                            symmetrize::Bool=true)
+    U = 1.0; η = -0.5; μ123 = μ; μ4 = 0.0
+    tms_hmt = make_hmt_su2u1(P; U=U, η=η, μ123=μ123, μ4=μ4, Δ=Δ)
+
     bestE = Inf; bestst = nothing; bestbs = nothing; bestR = 0; bestZ = 0
+
     for Z in (1,-1), R in (-1,1)
         bs = Basis(P.cfs, [Z, R], P.qnf)
         H  = Operator(bs, tms_hmt)
-        en, st = GetEigensystem(OpMat(H), k)
-        #println("en=$en")
-        @assert abs(imag(en[1])) ≤ 1e-12 "eig has large Im part: $(en)"
-        if real(en[1]) < bestE
-            bestE, bestst, bestbs, bestR, bestZ = real(en[1]), st[:,1], bs, R, Z
+
+        # 关键：把 OpMat 显式转成 Matrix{ComplexF64}
+        A  = Matrix(OpMat(H))
+
+        # 可选：检测厄米程度（相对量 ||A-A'||/||A||）
+        if check_hermiticity
+            rel = opnorm(A - A') / max(opnorm(A), eps())
+            @debug "μ=$μ (Z,R)=($Z,$R) rel_nonHerm=$rel"
+            @assert rel ≤ max(tol_rel, 1e-14) "H not Hermitian enough: rel=$rel at (Z,R)=($Z,$R)"
+        end
+
+        # 数值对称化 + 用厄米求解器（稳定、特征值严格实）
+        A  = symmetrize ? (A + A')/2 : A
+        vals, vecs = eigen(Hermitian(A))  # 升序
+
+        if vals[1] < bestE
+            bestE, bestst, bestbs, bestR, bestZ = vals[1], vecs[:,1], bs, R, Z
         end
     end
+
     return bestst, bestbs, bestE, bestR, bestZ
 end
+
+
 
 
 # function build_model_su3(; nml::Int)
