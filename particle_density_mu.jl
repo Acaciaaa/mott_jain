@@ -26,10 +26,10 @@ end
 
 # ==== 4) 扫 μ 并画图 ====
 #P = KLcommon.build_model(nmf=4)
-P = JAINcommon.build_model_su2u1(nml=6)
-μlower = -2.0
-μupper = 2.0
-mus = collect(range(μlower, μupper, length=10))
+P = JAINcommon.build_model_su2u1(nml=4)
+μlower = 0.0
+μupper = 1.0
+mus = collect(range(μlower, μupper, length=20))
 nf_avg_list = Float64[]; Nf_list = Float64[]
 for μ in mus
     nf_avg, Nf_tot = avg_nf_for_mu(P, μ)
@@ -40,7 +40,7 @@ end
 fig = Figure(size = (650, 650))
 ax  = Axis(fig[1, 1];
     xlabel = "μ",
-    ylabel = "⟨n_f⟩ per LLL orbital",
+    ylabel = "⟨n⟩",
     title  = "Average fermion density vs μ",
     aspect = 1,                               # ← 轴面板变成正方形
     limits = ((μlower, μupper), (-1.0, 4.0))       # ← x,y 范围

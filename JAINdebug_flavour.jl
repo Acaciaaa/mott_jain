@@ -193,8 +193,40 @@ function check_SU2_terms(P; μ=0.35, Δ=0.05)
     return ok_all, rels
 end
 
-# -------------------- 用法示例（可注释） --------------------
+
 P = JAINcommon.build_model_su2u1(nml=4)
-println("SU(2)  global: ", check_SU2(P; μ=0.35, Δ=0.05))
-println("SU(3)  global: ", check_SU3(P; μ=0.35, Δ=0.05))
-println("SU(2)  Terms : ", check_SU2_terms(P; μ=0.35, Δ=0.05))
+# println("SU(2)  global: ", check_SU2(P; μ=0.35, Δ=0.05))
+# println("SU(3)  global: ", check_SU3(P; μ=0.35, Δ=0.05))
+# println("SU(2)  Terms : ", check_SU2_terms(P; μ=0.35, Δ=0.05))
+
+# 把 Terms 层的 Δ_terms 投影到一个具体块 (Z,R)
+function _project_commutator_to_block(P::JAINcommon.ModelParams, Δ_terms; Z::Int=1, R::Int=1)
+    # Δ_terms 可能为空：直接返回 0
+    isempty(Δ_terms) && return 0.0
+    bs = Basis(P.cfs, [Z,R], P.qnf)
+    A  = Matrix(OpMat(Operator(bs, Δ_terms)))
+    return opnorm(A)
+end
+
+# 数值（投影）版：对每个 SU(2) 生成元，算 Δ_terms，再投影到四个块看范数
+function check_SU2_numeric_projected(P; μ::Float64=0.35, Δ::Float64=0.05, tol::Float64=1e-12)
+    Ht = JAINcommon.make_hmt_su2u1(P; μ123=μ, μ4=0.0, Δ=Δ)
+    Ms = su2_generators_on12()
+    res = Vector{NTuple{4,Float64}}()
+    ok_all = true
+    for M in Ms
+        tM  = flavor_generator_terms(P, M)
+        Δt  = SimplifyTerms(Ht*tM - tM*Ht)   # Terms 层对易子（可能为空）
+        r11 = _project_commutator_to_block(P, Δt; Z= 1, R= 1)
+        r1m = _project_commutator_to_block(P, Δt; Z= 1, R=-1)
+        rm1 = _project_commutator_to_block(P, Δt; Z=-1, R= 1)
+        rmm = _project_commutator_to_block(P, Δt; Z=-1, R=-1)
+        push!(res, (r11, r1m, rm1, rmm))
+        ok_all &= (maximum((r11, r1m, rm1, rmm)) ≤ tol)
+    end
+    return ok_all, res
+end
+
+ok_proj, res_proj = check_SU2_numeric_projected(P; μ=0.35, Δ=0.05)
+println("SU(2) projected per-block residuals: ", res_proj, "  ok=", ok_proj)
+

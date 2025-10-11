@@ -21,7 +21,7 @@ const choices = Dict(
     return n_avg, N_exp
 end
 
-mu_range    = collect(range(-2.0,  2.0; length=10))
+mu_range    = collect(range(0.0,  1.0; length=20))
 delta_range = collect(range(-1.0,  1.0; length=10))
 rows = NamedTuple[]
 

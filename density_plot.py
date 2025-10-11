@@ -5,7 +5,7 @@ df = pd.read_csv("data/density_mu_delta.csv")
 mus    = np.sort(df["mu"].unique())
 deltas = np.sort(df["delta"].unique())
 
-col = "n4"
+col = "n123"
 Z = df.pivot(index="delta", columns="mu", values=col).reindex(index=deltas, columns=mus).values
 X, Y = np.meshgrid(mus, deltas)
 

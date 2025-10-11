@@ -1,8 +1,6 @@
 include(joinpath(@__DIR__, ".", "KLcommon.jl"))
 using .KLcommon
 
-P = KLcommon.build_model(nmf=6)
-
 #############################################
 # 5) Fig.2b：ΔE_S √N_mf vs μ（单一尺寸）   #
 #############################################
@@ -15,7 +13,7 @@ function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
             @warn "μ=$(μ): 没找到 l=0,s=0 态（k太小？）"
             push!(y, NaN)
         else
-            push!(y, ΔE * sqrt(nmf))
+            push!(y, ΔE * sqrt(6))
             @info "μ=$(round(μ,digits=3))  ΔE_S=$(round(ΔE,digits=6))  sector=(R=$(info[5]),Z=$(info[6]))  <L2>=$(info[7])  <C2>=$(info[8])"
         end
     end
@@ -33,5 +31,6 @@ function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
 end
 
 # 例：μ ∈ [-0.4, 0.6]
+P = KLcommon.build_model(nmf=6)
 mus = collect(range(-0.4, 0.6, length=41))
 display(plot_singlet_gap_vs_mu(mus; k=30))

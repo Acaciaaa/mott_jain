@@ -85,7 +85,7 @@ function calculate_entanglement(P)
     qnd_a, qnf_a, secd_lst, secf_lst = quantuminfo_a(P)
     if P.name == :KL
         alpha_f, alpha_b = hemisphere_alpha(P)
-        bestst, bestbs, bestE, bestR, bestZ = KLcommon.ground_state(P, -2.0)
+        bestst, bestbs, bestE, bestR, bestZ = KLcommon.ground_state(P, 2.0)
         ent = GetEntSpec(
             bestst, bestbs, secd_lst, secf_lst;
             qnd_a=qnd_a, qnf_a=qnf_a,
@@ -94,7 +94,7 @@ function calculate_entanglement(P)
             )
     elseif P.name == :JAINsu2u1
         alpha_f = hemisphere_alpha(P)
-        bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, -2.0, 0.05)
+        bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, 0.8, 0.05)
         ent = GetEntSpec(
             bestst, bestbs, secd_lst, secf_lst;
             qnd_a=qnd_a, qnf_a=qnf_a,
@@ -140,7 +140,7 @@ using Statistics  # 需要 median
 # 去重计数：同层内 |ξ_i - ξ_j| ≤ tol 视为同一态（默认 tol=1e-6）
 function count_degeneracies_selected(
     pts::Vector{Tuple{Int,Float64}};
-    lz_range = -9:-5, ymin::Float64=0.0, ymax::Float64=10.0, tol::Float64=1e-8
+    lz_range = -15:15, ymin::Float64=0.0, ymax::Float64=10.0, tol::Float64=1e-14
 )
     deg = Int[]
     for lz in lz_range
@@ -179,11 +179,11 @@ function plot_edge_modes_selected(pts, QA_sel; deg=Int[], ymin=0.0, ymax=10.0)
 end
 
 # === 运行 ===
-P = KLcommon.build_model(nmf=4)
+P = KLcommon.build_model(nmf=6)
 #P = JAINcommon.build_model_su2u1(nml=4)
 pts, QA_sel = calculate_entanglement(P)
 ymin=0.0
-ymax=10.0
-deg, lz_used = count_degeneracies_selected(pts; lz_range = -9:-5, ymin=ymin, ymax=ymax)
+ymax=35.0
+deg, lz_used = count_degeneracies_selected(pts; lz_range = -15:15, ymin=ymin, ymax=ymax)
 @info "Degeneracies for Lz=-9..-5, ξ∈($ymin,$ymax), QA=$QA_sel" lz_used deg
 display(plot_edge_modes_selected(pts, QA_sel; deg=deg, ymin=ymin, ymax=ymax))

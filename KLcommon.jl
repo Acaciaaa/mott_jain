@@ -35,7 +35,6 @@ function build_model(; nmf::Int)
 
     FuzzifiED.ObsNormRadSq = nmf
 
-    # 守恒量（与你脚本一致）
     qnd = [
         SQNDiag(GetNeQNDiag(nof), nob) + 2*GetBosonNeSQNDiag(nof, nob),
         SQNDiag(GetLz2QNDiag(nmf, nff), nob) + GetBosonLz2SQNDiag(nof, nmb, nfb),
@@ -89,6 +88,8 @@ end
 function eigs_with_obs(P::ModelParams, bs::SBasis, tms_hmt; k::Int=30)
     H    = OpMat(SOperator(bs, tms_hmt))
     en, st = GetEigensystem(H, k)     # en::Vector, st::Matrix（列=本征矢）
+    @assert all(abs.(imag.(en)) .≤ 1e-12) "eig has large Im part: $(en)"
+    en = real.(en)
 
     L2   = OpMat(SOperator(bs, P.tms_l2))
     C2   = OpMat(SOperator(bs, P.tms_c2))
