@@ -1,9 +1,5 @@
-include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
-using .JAINcommon
-using FuzzifiED
-using LinearAlgebra
-using SpecialFunctions  # 如果需要 beta_inc 等
-using CairoMakie
+include(joinpath(@__DIR__, ".", "KLcommon.jl"))
+using .KLcommon
 
 #############################################
 # 5) Fig.2b：ΔE_S √N_mf vs μ（单一尺寸）   #
@@ -12,12 +8,12 @@ function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
     x = Float64.(mus)
     y = Float64[]
     for μ in x
-        ΔE, info = JAINcommon.singlet_gap(P, μ; k=k)
+        ΔE, info = KLcommon.singlet_gap(P, μ; k=k)
         if info === nothing
             @warn "μ=$(μ): 没找到 l=0,s=0 态（k太小？）"
             push!(y, NaN)
         else
-            push!(y, ΔE * sqrt(P.nml))
+            push!(y, ΔE * sqrt(6))
             @info "μ=$(round(μ,digits=3))  ΔE_S=$(round(ΔE,digits=6))  sector=(R=$(info[5]),Z=$(info[6]))  <L2>=$(info[7])  <C2>=$(info[8])"
         end
     end
@@ -34,6 +30,7 @@ function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
     fig
 end
 
-P = JAINcommon.build_model_su2u1(nml=4)
-mus = collect(range(0.0, 0.8, length=40))
+# 例：μ ∈ [-0.4, 0.6]
+P = KLcommon.build_model(nmf=6)
+mus = collect(range(-0.4, 0.6, length=40))
 display(plot_singlet_gap_vs_mu(mus; k=30))

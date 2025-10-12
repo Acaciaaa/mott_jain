@@ -179,11 +179,11 @@ function plot_edge_modes_selected(pts, QA_sel; deg=Int[], ymin=0.0, ymax=10.0)
 end
 
 # === 运行 ===
-P = KLcommon.build_model(nmf=6)
-#P = JAINcommon.build_model_su2u1(nml=4)
+#P = KLcommon.build_model(nmf=6)
+P = JAINcommon.build_model_su2u1(nml=4)
 pts, QA_sel = calculate_entanglement(P)
 ymin=0.0
-ymax=35.0
+ymax=10.0
 deg, lz_used = count_degeneracies_selected(pts; lz_range = -15:15, ymin=ymin, ymax=ymax)
 @info "Degeneracies for Lz=-9..-5, ξ∈($ymin,$ymax), QA=$QA_sel" lz_used deg
 display(plot_edge_modes_selected(pts, QA_sel; deg=deg, ymin=ymin, ymax=ymax))

@@ -28,7 +28,7 @@ end
 #P = KLcommon.build_model(nmf=4)
 P = JAINcommon.build_model_su2u1(nml=4)
 μlower = 0.0
-μupper = 1.0
+μupper = 0.7
 mus = collect(range(μlower, μupper, length=20))
 nf_avg_list = Float64[]; Nf_list = Float64[]
 for μ in mus

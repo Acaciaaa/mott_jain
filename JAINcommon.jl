@@ -37,8 +37,8 @@ Base.@kwdef mutable struct ModelParams
     tms_f123
     tms_f4
     tms_V1
-    # tms_l2
-    # tms_c2
+    tms_l2
+    tms_c2
 end
 
 function make_qnf_swap_and_roty(nml::Int, nmh::Int, no::Int)
@@ -228,40 +228,66 @@ function make_V1_terms_for_flavour(nm_per_flavour::AbstractVector{<:Integer},
 end
 
 function GetL2TermsMixed(nms::AbstractVector{<:Integer})
-    base = 0                      # 当前 flavour 的 0-based 块起点
-    tL2_total = Term[]            # 累加所有 flavour 的 L^2
+    @assert all(>(0), nms) "nm must be positive per flavour"
 
+    # 先汇总“总 Lz / 总 L+”，包含所有 flavour
+    tLz_all = Term[]
+    tLp_all = Term[]
+
+    base = 0  # 当前 flavour 的 0-based 块起点
     for nm in nms
-        s = (nm - 1)/2
-        # ---- 当前块的 Lz ----
-        tLz = Term[]
-        @inbounds for k in 0:nm-1
-            o = base + k + 1                # 全局 1-based 轨道号（在“本块内”的第 k 层）
-            push!(tLz, Term(k - s, [1,o,0,o]))
-        end
-        tLz = SimplifyTerms(tLz)
+        s = (nm - 1) / 2
 
-        # ---- 当前块的 L+（块内 m: k-1 -> k）----
-        tLp = Term[]
+        # —— 本块的 Lz 贡献：sum_k (k - s) n_{base+k}
+        @inbounds for k in 0:nm-1
+            o = base + k + 1
+            push!(tLz_all, Term(k - s, [1, o, 0, o]))
+        end
+
+        # —— 本块的 L+ 贡献：sum_k √(k(nm-k)) |k><k-1|（块内）
         @inbounds for k in 1:nm-1
             o_to   = base + k + 1
             o_from = base + (k-1) + 1
-            coeff  = sqrt(k * (nm - k))     # = √[(s-(k-1)) (s+(k-1)+1)]
-            push!(tLp, Term(coeff, [1,o_to,0,o_from]))
+            coeff  = sqrt(k * (nm - k))
+            push!(tLp_all, Term(coeff, [1, o_to, 0, o_from]))
         end
-        tLp = SimplifyTerms(tLp)
-        tLm = adjoint(tLp)
 
-        # ---- 块内 L^2 = Lz^2 - Lz + L+L- ----
-        tL2_block = SimplifyTerms(tLz*tLz - tLz + tLp*tLm)
-        append!(tL2_total, tL2_block)
-
-        base += nm                    # 下一 flavour 的块起点
+        base += nm
     end
 
-    return SimplifyTerms(tL2_total)
+    # 合并简化后再组合 L^2（这样自动带上所有交叉项）
+    tLz = SimplifyTerms(tLz_all)
+    tLp = SimplifyTerms(tLp_all)
+    tLm = tLp'  # Hermitian 共轭
+
+    return SimplifyTerms(tLz*tLz - tLz + tLp*tLm)  # = (∑f Lf)^2
 end
 
+function GetC2TermsMixed(nml::Int; offset0::Int=0)
+    base1 = offset0               # f1 起点
+    base2 = offset0 + nml         # f2 起点（紧跟 f1 之后）
+    tms = Term[]
+
+    # 交换项: + 1/2 (c†_{f1,m1} c_{f2,m1})(c†_{f2,m2} c_{f1,m2})
+    for m1 = 0:nml-1, m2 = 0:nml-1
+        o1 = base1 + m1 + 1
+        o2 = base2 + m1 + 1
+        o3 = base2 + m2 + 1
+        o4 = base1 + m2 + 1
+        tms += Terms(0.5, [1,o1,0,o2, 1,o3,0,o4])
+    end
+
+    # 去迹密度项: - 1/(2*Nf) * sum_fa,sum_fb n_fa n_fb ；这里 Nf=2 -> -1/4
+    for fa_base in (base1, base2), fb_base in (base1, base2)
+        for m1 = 0:nml-1, m2 = 0:nml-1
+            o1 = fa_base + m1 + 1
+            o3 = fb_base + m2 + 1
+            tms -= Terms(0.25, [1,o1,0,o1, 1,o3,0,o3])
+        end
+    end
+
+    return SimplifyTerms(tms)
+end
 
 # ===================== 模型搭建 =====================
 function build_model_su2u1(; nml::Int)
@@ -302,10 +328,8 @@ function build_model_su2u1(; nml::Int)
 
     tms_V1 = make_V1_terms_for_flavour(nm_vec, 4; V1=1.0)
 
-
-    # tms_l2 = GetL2TermsMixed(nm_vec)
-
-    # tms_c2 = GetC2Terms(nml, nfl, [Sx, Sy, Sz])
+    tms_l2 = GetL2TermsMixed(nm_vec)
+    tms_c2 = GetC2TermsMixed(nml)
 
     # for (nm, t) in [(:tms_hop, tms_hop), (:tms_int, tms_int), (:tms_br, tms_br), (:tms_f123, tms_f123), (:tms_f4, tms_f4)]
     #     Δ = SimplifyTerms(t - adjoint(t))
@@ -313,7 +337,7 @@ function build_model_su2u1(; nml::Int)
     # end
 
     return ModelParams(; name=:JAINsu2u1, nml, nfl, nol, nmh, nfh, noh, no, l2l, l2h, qnd, qnf, cfs, nm_vec,
-    tms_hop, tms_int, tms_br, tms_f123, tms_f4, tms_V1) #, tms_l2, tms_c2)
+    tms_hop, tms_int, tms_br, tms_f123, tms_f4, tms_V1, tms_l2, tms_c2)
 end
 
 make_hmt_su2u1(P::ModelParams; U::Float64=1.0, η::Float64=-0.5, μ123::Float64, μ4::Float64, Δ::Float64, V1::Float64=0.6) = SimplifyTerms(
@@ -328,7 +352,7 @@ function ground_state_su2u1(P::ModelParams, μ::Float64, Δ::Float64, k::Int=1;
                             check_hermiticity::Bool=true,
                             tol_rel::Float64=1e-12,
                             symmetrize::Bool=true)
-    U = 1.0; η = -0.5; μ123 = μ; μ4 = 0.0; V1 = 0.6
+    U = 1.0; η = -0.5; μ123 = μ; μ4 = 0.0; V1 = 0.8
     tms_hmt = make_hmt_su2u1(P; U=U, η=η, μ123=μ123, μ4=μ4, Δ=Δ, V1=V1)
 
     bestE = Inf; bestst = nothing; bestbs = nothing; bestR = 0; bestZ = 0
@@ -359,7 +383,104 @@ function ground_state_su2u1(P::ModelParams, μ::Float64, Δ::Float64, k::Int=1;
     return bestst, bestbs, bestE, bestR, bestZ
 end
 
+# ——— 在一个扇区里求前 k 个本征，并计算 <L^2>、<C2>（Mixed 版）———
+function eigs_with_obs(P::ModelParams, bs::Basis, tms_hmt; k::Int=30)
+    H = OpMat(Operator(bs, tms_hmt))
+    en, st = GetEigensystem(H, k)                 # 列向量为本征矢
+    @assert all(abs.(imag.(en)) .≤ 1e-12) "eig has large Im part: $(en)"
+    en = real.(en)
 
+    L2 = OpMat(Operator(bs, P.tms_l2))           # 这里要求 P.tms_l2 已由 GetL2TermsMixed 构造
+    C2 = OpMat(Operator(bs, P.tms_c2))           # 这里要求 P.tms_c2 已由 GetC2TermsMixed 构造
+
+    L2v = [ real(st[:, i]' * L2 * st[:, i]) for i in eachindex(en) ]
+    C2v = [ real(st[:, i]' * C2 * st[:, i]) for i in eachindex(en) ]
+    return en, st, L2v, C2v
+end
+
+# ——— 选出 “singlet gap”：最低的 l=0 且 s=0 的激发能量差 ΔE_S（Mixed 版）———
+function singlet_gap(P::ModelParams, μ::Float64; k::Int=30,
+                     tolL2::Float64=√(eps(Float64)),
+                     tolC2::Float64=√(eps(Float64)))
+    # —— 与 Mixed 布局一致的哈密顿量（按你给的参数）——
+    U = 1.0; η = -0.5; μ123 = μ; μ4 = 0.0; V1 = 0.8
+    tms_hmt = make_hmt_su2u1(P; U=U, η=η, μ123=μ123, μ4=μ4, Δ=0.05, V1=V1)
+
+    bestΔ = Inf
+    best  = nothing   # (ΔE, E0, Eexc, idx, R, Z, L2, C2)
+
+    # 仅 L 或仅 S 通过时的最好候选
+    best_L_only = nothing  # 同上 tuple 结构
+    best_S_only = nothing
+
+    # 记录“最接近”阈值的数值（便于诊断）
+    # 结构: (val, ΔE, idx, R, Z)
+    nearest_L = (Inf, Inf, 0, 0, 0)
+    nearest_S = (Inf, Inf, 0, 0, 0)
+
+    for Z in (1, -1), R in (-1, 1)
+        bs = Basis(P.cfs, [R, Z], P.qnf)
+        en, st, L2v, C2v = eigs_with_obs(P, bs, tms_hmt; k=k)
+        E0 = en[1]
+
+        # 从第 2 个开始（排除基态）
+        for i in 2:lastindex(en)
+            Lok = (L2v[i] ≤ tolL2)
+            Sok = (C2v[i] ≤ tolC2)
+            Δ   = en[i] - E0
+
+            # 更新“最接近”记录
+            if L2v[i] < nearest_L[1]
+                nearest_L = (L2v[i], Δ, i, R, Z)
+            end
+            if C2v[i] < nearest_S[1]
+                nearest_S = (C2v[i], Δ, i, R, Z)
+            end
+
+            if Lok && Sok
+                if Δ < bestΔ
+                    bestΔ = Δ
+                    best  = (Δ, E0, en[i], i, R, Z, L2v[i], C2v[i])
+                end
+                break  # 本扇区已找到最低 singlet，切换扇区
+            elseif Lok && !Sok
+                if best_L_only === nothing || Δ < best_L_only[1]
+                    best_L_only = (Δ, E0, en[i], i, R, Z, L2v[i], C2v[i])
+                end
+            elseif !Lok && Sok
+                if best_S_only === nothing || Δ < best_S_only[1]
+                    best_S_only = (Δ, E0, en[i], i, R, Z, L2v[i], C2v[i])
+                end
+            end
+        end
+    end
+
+    if best === nothing
+        # 诊断信息：到底卡在 L 还是 S？
+        msg = "μ=$(μ): 没找到 l=0,s=0 态（k=$k）。"
+        msg *= " 最近的 L²=$(nearest_L[1]): ΔE=$(nearest_L[2]) @ i=$(nearest_L[3]) (R=$(nearest_L[4]),Z=$(nearest_L[5]));"
+        msg *= " 最近的 C₂=$(nearest_S[1]): ΔE=$(nearest_S[2]) @ i=$(nearest_S[3]) (R=$(nearest_S[4]),Z=$(nearest_S[5]))."
+
+        if nearest_L[1] > tolL2 && nearest_S[1] ≤ tolC2
+            @warn msg * " 结论：主要卡在 L 条件（L²>tolL2）。"
+        elseif nearest_L[1] ≤ tolL2 && nearest_S[1] > tolC2
+            @warn msg * " 结论：主要卡在 S 条件（C₂>tolC2）。"
+        elseif nearest_L[1] > tolL2 && nearest_S[1] > tolC2
+            @warn msg * " 结论：L 与 S 条件均未满足（阈值或算符/布局需检查）。"
+        else
+            @warn msg * " 结论：接近阈值但未同时满足（考虑放宽 tol 或增大 k）。"
+        end
+
+        # 返回同时附带诊断；保持原接口前两项兼容
+        diag = (nearest_L = nearest_L, nearest_S = nearest_S,
+                best_L_only = best_L_only, best_S_only = best_S_only)
+        return (NaN, nothing, diag)
+    else
+        diag = (nearest_L = nearest_L, nearest_S = nearest_S,
+                best_L_only = best_L_only, best_S_only = best_S_only)
+        return (bestΔ, best, diag)
+    end
+end
 
 
 # function build_model_su3(; nml::Int)

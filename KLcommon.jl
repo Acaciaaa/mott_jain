@@ -101,20 +101,28 @@ end
 
 # 4) 选出 “singlet gap”：最低的 l=0 & s=0 的激发能量差 ΔE_S #
 function singlet_gap(P::ModelParams, μ::Float64; k::Int=30,
-                            tolL2::Float64=√(eps(Float64)),
-                            tolC2::Float64=√(eps(Float64)))
+                     tolL2::Float64=√(eps(Float64)),
+                     tolC2::Float64=√(eps(Float64)))
     tms_hmt = make_hmt_terms(P, μ)
 
     bestΔ = Inf
     best  = nothing  # (ΔE, E0, Eexc, idx, R, Z, L2, C2)
+
     for Z in (1, -1), R in (-1, 1)
         bs = SBasis(P.cfs, [R, Z], P.qnf)
         en, st, L2v, C2v = eigs_with_obs(P, bs, tms_hmt; k=k)
         E0 = en[1]
+
         # 从第2个开始（排除基态）
         for i in 2:lastindex(en)
-            (L2v[i] ≤ tolL2 && C2v[i] ≤ tolC2) || continue  # l=0 & s=0
+            (L2v[i] ≤ tolL2 && C2v[i] ≤ tolC2) || continue  # 仍然只要 l=0 & s=0
+
             Δ = en[i] - E0
+
+            # —— 新增：打印该扇区找到的 singlet 的 L2/C2 数值（以及能隙）——
+            println("singlet @ sector (R=$(R), Z=$(Z)), idx=$(i): ",
+                    "L2=$(L2v[i]), C2=$(C2v[i]), ΔE=$(Δ)")
+
             if Δ < bestΔ
                 bestΔ = Δ
                 best  = (Δ, E0, en[i], i, R, Z, L2v[i], C2v[i])
@@ -122,6 +130,7 @@ function singlet_gap(P::ModelParams, μ::Float64; k::Int=30,
             break  # 本扇区已找到最靠下的 singlet，换下一个扇区
         end
     end
+
     return best === nothing ? (NaN, nothing) : (bestΔ, best)
 end
 
