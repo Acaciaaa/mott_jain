@@ -2,12 +2,9 @@ include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
 using .JAINcommon
 using FuzzifiED
 using LinearAlgebra
-using SpecialFunctions  # 如果需要 beta_inc 等
+using SpecialFunctions 
 using CairoMakie
 
-#############################################
-# 5) Fig.2b：ΔE_S √N_mf vs μ（单一尺寸）   #
-#############################################
 function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
     x = Float64.(mus)
     y = Float64[]
@@ -25,8 +22,8 @@ function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
     fig = Figure(size=(650,650))
     ax  = Axis(fig[1,1];
         xlabel = "μ",
-        ylabel = "ΔE_S · √N_mf",
-        title  = "Singlet gap across μ",
+        ylabel = "ΔE_S · √nml",
+        title  = "Singlet gap vs μ",
         aspect = 1,
         limits = ((minimum(x), maximum(x)), (0, maximum(skipmissing(y))*1.1))
     )
@@ -35,5 +32,7 @@ function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
 end
 
 P = JAINcommon.build_model_su2u1(nml=4)
-mus = collect(range(0.0, 0.8, length=40))
-display(plot_singlet_gap_vs_mu(mus; k=30))
+redirect_stdout(devnull) do
+    mus = collect(range(0.0, 1.0, length=20))
+    display(plot_singlet_gap_vs_mu(mus; k=200))
+end

@@ -264,11 +264,11 @@ function GetL2TermsMixed(nms::AbstractVector{<:Integer})
 end
 
 function GetC2TermsMixed(nml::Int; offset0::Int=0)
-    base1 = offset0               # f1 起点
-    base2 = offset0 + nml         # f2 起点（紧跟 f1 之后）
+    base1 = offset0             
+    base2 = offset0 + nml        
     tms = Term[]
 
-    # 交换项: + 1/2 (c†_{f1,m1} c_{f2,m1})(c†_{f2,m2} c_{f1,m2})
+    # 1/2 (c†_{f1,m1} c_{f2,m1})(c†_{f2,m2} c_{f1,m2})
     for m1 = 0:nml-1, m2 = 0:nml-1
         o1 = base1 + m1 + 1
         o2 = base2 + m1 + 1
@@ -277,7 +277,7 @@ function GetC2TermsMixed(nml::Int; offset0::Int=0)
         tms += Terms(0.5, [1,o1,0,o2, 1,o3,0,o4])
     end
 
-    # 去迹密度项: - 1/(2*Nf) * sum_fa,sum_fb n_fa n_fb ；这里 Nf=2 -> -1/4
+    #  - 1/(2*Nf) * sum_fa,sum_fb n_fa n_fb ；这里 Nf=2 -> -1/4
     for fa_base in (base1, base2), fb_base in (base1, base2)
         for m1 = 0:nml-1, m2 = 0:nml-1
             o1 = fa_base + m1 + 1
@@ -312,17 +312,22 @@ function build_model_su2u1(; nml::Int)
 
     cfs = Confs(no, [nol, 0, 0], qnd) 
 
-    nm_vec = [nml, nml, nml, nmh]              # 4 个 flavour 的 nm
-    ψ1 = GetElectronObsMixed(nm_vec, 1)        # 轻 flavour 1 湮灭
+    nm_vec = [nml, nml, nml, nmh]        
+    ψ1 = GetElectronObsMixed(nm_vec, 1)       
     ψ2 = GetElectronObsMixed(nm_vec, 2)
     ψ3 = GetElectronObsMixed(nm_vec, 3)
-    ψ4 = GetElectronObsMixed(nm_vec, 4)        # 重 flavour 湮灭
+    ψ4 = GetElectronObsMixed(nm_vec, 4)      
     tms_hop = GetIntegral(ψ4'*ψ1*ψ2*ψ3)
 
     den_e = StoreComps(GetDensityObsMixed(nm_vec, Diagonal([1, 1, 1, 3])))
     tms_int = GetIntegral(den_e * den_e)
 
-    tms_br = GetPolTermsMixed(nm_vec, Diagonal([1.0, 1.0, -2.0, 0.0]))
+    br_1 = StoreComps(GetDensityObsMixed(nm_vec, Diagonal([1, 0, 0, 0])))
+    br_2 = StoreComps(GetDensityObsMixed(nm_vec, Diagonal([0, 1, 0, 0])))
+    br_3 = StoreComps(GetDensityObsMixed(nm_vec, Diagonal([0, 0, 1, 0])))
+    tms_br = GetIntegral(br_1 * br_1)+GetIntegral(br_2 * br_2)- 2 * GetIntegral(br_3 * br_3)
+
+    #tms_br = GetPolTermsMixed(nm_vec, Diagonal([1.0, 1.0, -2.0, 0.0]))
     tms_f123 = GetPolTermsMixed(nm_vec, Diagonal([1.0, 1.0, 1.0, 0.0]))
     tms_f4 = GetPolTermsMixed(nm_vec, Diagonal([0.0, 0.0, 0.0, 1.0]))
 
@@ -409,11 +414,9 @@ function singlet_gap(P::ModelParams, μ::Float64; k::Int=30,
     bestΔ = Inf
     best  = nothing   # (ΔE, E0, Eexc, idx, R, Z, L2, C2)
 
-    # 仅 L 或仅 S 通过时的最好候选
-    best_L_only = nothing  # 同上 tuple 结构
+    best_L_only = nothing
     best_S_only = nothing
 
-    # 记录“最接近”阈值的数值（便于诊断）
     # 结构: (val, ΔE, idx, R, Z)
     nearest_L = (Inf, Inf, 0, 0, 0)
     nearest_S = (Inf, Inf, 0, 0, 0)
@@ -423,26 +426,28 @@ function singlet_gap(P::ModelParams, μ::Float64; k::Int=30,
         en, st, L2v, C2v = eigs_with_obs(P, bs, tms_hmt; k=k)
         E0 = en[1]
 
-        # 从第 2 个开始（排除基态）
-        for i in 2:lastindex(en)
-            Lok = (L2v[i] ≤ tolL2)
-            Sok = (C2v[i] ≤ tolC2)
-            Δ   = en[i] - E0
+        for i in 2:lastindex(en)  # 排除基态
+            # —— 仅此处改动：用绝对值比较 —— 
+            Lok = (abs(L2v[i]) ≤ tolL2)
+            Sok = (abs(C2v[i]) ≤ tolC2)
 
-            # 更新“最接近”记录
-            if L2v[i] < nearest_L[1]
-                nearest_L = (L2v[i], Δ, i, R, Z)
+            Δ = en[i] - E0
+
+            if abs(L2v[i]) < nearest_L[1]
+                nearest_L = (abs(L2v[i]), Δ, i, R, Z)
             end
-            if C2v[i] < nearest_S[1]
-                nearest_S = (C2v[i], Δ, i, R, Z)
+            if abs(C2v[i]) < nearest_S[1]
+                nearest_S = (abs(C2v[i]), Δ, i, R, Z)
             end
 
             if Lok && Sok
+                # 打印该 singlet 的 L2 / C2 / ΔE（保持你要的可视化）
+                println("singlet @ (R=$(R), Z=$(Z)), idx=$(i): L2=$(L2v[i]), C2=$(C2v[i]), ΔE=$(Δ)")
                 if Δ < bestΔ
                     bestΔ = Δ
                     best  = (Δ, E0, en[i], i, R, Z, L2v[i], C2v[i])
                 end
-                break  # 本扇区已找到最低 singlet，切换扇区
+                break
             elseif Lok && !Sok
                 if best_L_only === nothing || Δ < best_L_only[1]
                     best_L_only = (Δ, E0, en[i], i, R, Z, L2v[i], C2v[i])
@@ -456,22 +461,20 @@ function singlet_gap(P::ModelParams, μ::Float64; k::Int=30,
     end
 
     if best === nothing
-        # 诊断信息：到底卡在 L 还是 S？
         msg = "μ=$(μ): 没找到 l=0,s=0 态（k=$k）。"
-        msg *= " 最近的 L²=$(nearest_L[1]): ΔE=$(nearest_L[2]) @ i=$(nearest_L[3]) (R=$(nearest_L[4]),Z=$(nearest_L[5]));"
-        msg *= " 最近的 C₂=$(nearest_S[1]): ΔE=$(nearest_S[2]) @ i=$(nearest_S[3]) (R=$(nearest_S[4]),Z=$(nearest_S[5]))."
+        msg *= " 最近的 |L²|=$(nearest_L[1]): ΔE=$(nearest_L[2]) @ i=$(nearest_L[3]) (R=$(nearest_L[4]),Z=$(nearest_L[5]));"
+        msg *= " 最近的 |C₂|=$(nearest_S[1]): ΔE=$(nearest_S[2]) @ i=$(nearest_S[3]) (R=$(nearest_S[4]),Z=$(nearest_S[5]))."
 
         if nearest_L[1] > tolL2 && nearest_S[1] ≤ tolC2
-            @warn msg * " 结论：主要卡在 L 条件（L²>tolL2）。"
+            @warn msg * " 结论：主要卡在 L 条件（|L²|>tolL2）。"
         elseif nearest_L[1] ≤ tolL2 && nearest_S[1] > tolC2
-            @warn msg * " 结论：主要卡在 S 条件（C₂>tolC2）。"
+            @warn msg * " 结论：主要卡在 S 条件（|C₂|>tolC2）。"
         elseif nearest_L[1] > tolL2 && nearest_S[1] > tolC2
             @warn msg * " 结论：L 与 S 条件均未满足（阈值或算符/布局需检查）。"
         else
             @warn msg * " 结论：接近阈值但未同时满足（考虑放宽 tol 或增大 k）。"
         end
 
-        # 返回同时附带诊断；保持原接口前两项兼容
         diag = (nearest_L = nearest_L, nearest_S = nearest_S,
                 best_L_only = best_L_only, best_S_only = best_S_only)
         return (NaN, nothing, diag)
@@ -481,7 +484,6 @@ function singlet_gap(P::ModelParams, μ::Float64; k::Int=30,
         return (bestΔ, best, diag)
     end
 end
-
 
 # function build_model_su3(; nml::Int)
 #     nfl = 3
