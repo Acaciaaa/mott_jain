@@ -90,14 +90,15 @@ function build_model(; nm1::Int)
     tms_lm = tms_lp'
     tms_l2 = SimplifyTerms(tms_lz * tms_lz - tms_lz + tms_lp * tms_lm)
     tms_c2 = GetC2Terms(nm1, nf1, :SU)
+    
     return ModelParams(; name=:PADsu3, nm1, s, nf1, no1, nm0, nf0, no0, no, qnd, qnf, cfs, 
     tms_hop, tms_int, tms_f123, tms_V1, tms_l2, tms_c2)
 end
 
 make_tms_hmt(P::ModelParams, μ::Float64) = SimplifyTerms(
-    1.0 * P.tms_int
+    0.5 * P.tms_int
     + 1.0 * P.tms_V1
-    - 0.5 * (P.tms_hop + P.tms_hop')
+    - 0.8 * (P.tms_hop + P.tms_hop')
     + μ * P.tms_f123
 )
 
@@ -130,45 +131,64 @@ function ground_state(P::ModelParams, μ::Float64, k::Int=1;
     return bestst, bestbs, bestE, bestR, bestZ
 end
 
+function lowest_k_states(P::ModelParams, μ::Float64, k::Int=30)
+    results = []
+    for Sz in 0:1, Z in (1, -1), R in (1, -1) 
+        bs = Basis(P.cfs[Sz], [Z, R], P.qnf)
+        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ)))
+        n = hmt_mat.dimd
+        
+        if n == 0
+            continue
+        elseif n == 1
+            hmatrix = Matrix(hmt_mat)
+            enrg = [hmatrix[1,1]]
+            st   = ones(eltype(hmatrix), 1, 1)
+        elseif n ≤ 128
+            hmatrix = Matrix(hmt_mat)
+            vals, vecs = eigen(hmatrix)
+            k_req =  min(k, n)
+            idx   =  sortperm(vals)[1:k_req]
+            enrg, st = vals[idx], vecs[:, idx]
+        else
+            enrg, st = GetEigensystem(hmt_mat, k)
+        end
+        l2_mat = OpMat(Operator(bs, P.tms_l2)) 
+        c2_mat = OpMat(Operator(bs, P.tms_c2)) 
+        l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
+        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)] 
+        for i in eachindex(enrg) 
+            #push!(results, (E=enrg[i], L2=l2_val[i], C2=c2_val[i], Sz=Sz, R=R, Z=Z, i=i))
+            push!(results, vcat(round.([enrg[i], l2_val[i], c2_val[i]]; digits=7), Sz))
+        end 
+    end 
+    sort!(results, by = st -> real(st[1]))
+    return results
+end
+
+using JLD2, Dates
+function write_results(P::ModelParams, mus, k::Int=30, path::AbstractString = "data/results_$(P.nm1).jld2")
+    mkpath(dirname(path))
+    mus_vec = collect(round.(Float64.(mus); digits=4))
+    results_vec = Vector{Vector{Vector{Float64}}}(undef, length(mus_vec))
+    for (i, μ) in enumerate(mus_vec)
+        results_vec[i] = lowest_k_states(P, μ, k)
+    end
+    meta = Dict{String,Any}("nml"=>P.nm1, "k"=>k, "count_mu"=>length(mus_vec), "updated_at"=>string(Dates.now()))
+    @save path mus=mus_vec results=results_vec meta
+    println("✅ Saved $(length(mus_vec)) μ values (rounded to 4 decimals) to $path")
+end
+
+function read_results(nm1, path::AbstractString = "data/results_$(nm1).jld2")
+    @assert isfile(path) "未找到文件"
+    obj = JLD2.load(path)
+    @assert haskey(obj, "mus") "文件缺少 'mus' 字段"
+    @assert haskey(obj, "results") "文件缺少 'results' 字段"
+    mus         = obj["mus"]::Vector{Float64}
+    results_vec = obj["results"]::Vector{Vector{Vector{Float64}}}
+    @assert length(mus) == length(results_vec) "文件损坏 mus 与 results 长度不一致"
+    return mus, results_vec
+end
 
 
-# μ_ls = collect(0.0 : 0.01 : 0.2)
-# Δ_ls = Float64[]
-# for μ in μ_ls
-#     bs = Basis(cfs[0], [1, 1], qnf)
-#     hmt = Operator(bs, tms_hmt(0.5, 1, 0.5, μ))
-#     hmt_mat = OpMat(hmt)
-#     enrg, st = GetEigensystem(hmt_mat, 5)
-#     sort!(enrg)
-#     ΔE = enrg[2] - enrg[1]
-#     @show μ, ΔE
-#     push!(Δ_ls, ΔE)
-# end 
-# using Plots 
-# plot(μ_ls, Δ_ls)
-
-# result = []
-# for Sz = 0 : 1, Z in [1, -1], R in [1, -1]
-#     bs = Basis(cfs[Sz], [R, Z], qnf)
-#     hmt = Operator(bs, tms_hmt(0.5, 1, 0.5, 0.085))
-#     hmt_mat = OpMat(hmt)
-#     enrg, st = GetEigensystem(hmt_mat, 5)
-
-#     l2 = Operator(bs, tms_l2)
-#     l2_mat = OpMat(l2)
-#     l2_val = [ st[:, i]' * l2_mat * st[:, i] for i in eachindex(enrg)]
-
-#     c2 = Operator(bs, tms_c2)
-#     c2_mat = OpMat(c2)
-#     c2_val = [ st[:, i]' * c2_mat * st[:, i] for i in eachindex(enrg)]
-
-#     for i in eachindex(enrg)
-#         push!(result, round.([enrg[i], l2_val[i], c2_val[i]] .+ √eps(Float64), digits = 7))
-#     end
-# end
-# sort!(result, by = st -> real(st[1])) 
-# enrg_0 = result[1][1]
-# enrg_1 = (filter(st -> st[2] ≈ 6 && st[3] ≈ 0, result)[1][1] - enrg_0) / 3
-# result_dim = [ [ (st[1] - enrg_0) / enrg_1 ; st] for st in result if st[2] < 12 ]
-# display(permutedims(hcat(result_dim...)))
 end

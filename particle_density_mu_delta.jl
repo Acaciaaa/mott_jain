@@ -1,11 +1,11 @@
 using LinearAlgebra
 using CSV, DataFrames
 
-include(joinpath(@__DIR__, "JAINcommon.jl"))
-using .JAINcommon
+include(joinpath(@__DIR__, "pad_su3.jl"))
+using .PADsu3
 using FuzzifiED
 
-P = JAINcommon.build_model_su2u1(nml=4)
+P = PADsu3.build_model(nm1=4)
 const choices = Dict(
     :n123 => (Diagonal([1.0, 1.0, 1.0, 0.0]), P.nml),
     :n12  => (Diagonal([1.0, 1.0, 0.0, 0.0]), P.nml),

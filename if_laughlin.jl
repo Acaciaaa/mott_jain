@@ -1,7 +1,9 @@
 include(joinpath(@__DIR__, ".", "KLcommon.jl"))
 include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
+include(joinpath(@__DIR__, ".", "pad_su3.jl"))
 using .KLcommon
 using .JAINcommon
+using .PADsu3
 using FuzzifiED
 using FuzzifiED.Fuzzifino
 using LinearAlgebra
@@ -9,36 +11,31 @@ using SpecialFunctions
 using CairoMakie
 using WignerSymbols
 
-function make_V3_terms_for_flavour(nm_per_flavour::AbstractVector{<:Integer},
-                                   f::Int; V3::Float64=1.0, offset0::Int=0)
+function make_V1_terms_pad(name, nm1::Int, nm0::Int; V::Float64=1.0, offset0::Int=0)
+    base = offset0 + 3 * nm1
+    nmf  = nm0
 
-    @assert 1 ≤ f ≤ length(nm_per_flavour)
-    
-    base = offset0 + sum(nm_per_flavour[1:f-1])
-    nmf  = nm_per_flavour[f]
-    @assert nmf ≥ 4 "m=3 通道需要 nmf ≥ 4（否则 L=2S-3<0 不存在）"
-
-    # 2S = nmf - 1；取 L = 2S - 3（对应 m=3 的通道）
     twoS = nmf - 1
-    L    = twoS - 3
-    @assert L ≥ 0
+    if name == :V1
+        L    = twoS - 1
+    elseif name == :V3
+        L = twoS - 3
+    end
 
     two_m_of_k(k) = 2k - twoS
 
-    # 为了 O(n^3)：按 twoM=2M 分桶
-    buckets = Dict{Int, Vector{NTuple{3,Int}}}()   # 暂存 k1,k2,twoM
-    coeffs  = Dict{Tuple{Int,Int}, Float64}()      # (k1,k2) => CG
+    buckets = Dict{Int, Vector{NTuple{3,Int}}}()
+    coeffs  = Dict{Tuple{Int,Int}, Float64}()
 
     @inbounds for k1 in 0:nmf-1, k2 in 0:nmf-1
-        tm1 = two_m_of_k(k1);  tm2 = two_m_of_k(k2)
-        twoM = tm1 + tm2                   
-        if abs(twoM) > 2L                  
+        tm1 = two_m_of_k(k1)
+        tm2 = two_m_of_k(k2)
+        twoM = tm1 + tm2
+        if abs(twoM) > 2L
             continue
         end
-        # CG 系数：<S m1, S m2 | L M>
-        c = WignerSymbols.clebschgordan(Float64, twoS//2, tm1//2,
-                                                   twoS//2, tm2//2,
-                                                   L,        twoM//2)
+        c = WignerSymbols.clebschgordan(Float64,
+                twoS//2, tm1//2, twoS//2, tm2//2, L, twoM//2)
         if c == 0.0
             continue
         end
@@ -51,7 +48,7 @@ function make_V3_terms_for_flavour(nm_per_flavour::AbstractVector{<:Integer},
         @inbounds for a in pairs, b in pairs
             k1, k2 = a[1], a[2]
             k3, k4 = b[1], b[2]
-            v = 0.5 * V3 * coeffs[(k1,k2)] * coeffs[(k3,k4)]
+            v = 0.5 * V * coeffs[(k1,k2)] * coeffs[(k3,k4)]
             if v != 0.0
                 o1 = base + k1 + 1
                 o2 = base + k2 + 1
@@ -65,30 +62,29 @@ function make_V3_terms_for_flavour(nm_per_flavour::AbstractVector{<:Integer},
     return SimplifyTerms(tms)
 end
 
-function check_laughlin(bestst, bestbs, P; f_heavy::Int=4, tol0::Float64=1e-10)
+function check_laughlin(name, bestst, bestbs, P; f_heavy::Int=4, tol0::Float64=1e-10)
     ψ = bestst ./ norm(bestst)
-    # tms_V3 = make_V3_terms_for_flavour(P.nm_vec, 4; V3=1.0)
-    # MV1 = Matrix(OpMat(Operator(bestbs, tms_V3)))
-    MV1 = Matrix(OpMat(Operator(bestbs, P.tms_V1)))
+    # MV1 = Matrix(OpMat(Operator(bestbs, P.tms_V1))) 只有JAINcommon用
+    tms_V = make_V1_terms_pad(name, P.nm1, P.nm0)
+    MV = Matrix(OpMat(Operator(bestbs, tms_V)))
+    
+    E_V = real(dot(ψ, MV * ψ))
 
-    E_V1 = real(dot(ψ, MV1 * ψ))
-
-    vals, vecs = eigen(Hermitian(MV1))
+    vals, vecs = eigen(Hermitian(MV))
     Z = findall(v -> v < tol0, vals)  
     overlap2 = isempty(Z) ? 0.0 : sum(abs2, vecs[:,Z]' * ψ)
 
-    return E_V1, overlap2
+    return E_V, overlap2
 end
 
 
-P = JAINcommon.build_model_su2u1(nml=4)
-bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, 0.8, 0.05)
-E_V1, overlap2 = check_laughlin(bestst, bestbs, P; f_heavy=4, tol0=1e-10)
+#P = JAINcommon.build_model_su2u1(nml=4)
+P = PADsu3.build_model(nm1=4)
+#bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, 0.8, 0.05)
+bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, 0.6)
+E_V1, overlap2_1 = check_laughlin(:V1, bestst, bestbs, P)
+E_V3, overlap2_3 = check_laughlin(:V3, bestst, bestbs, P)
 println("⟨H_V1⟩ = ", E_V1)
-println("overlap with ker(H_V1) = ", overlap2)
-
-if (E_V1 < 1e-10) && (overlap2 > 1 - 1e-8)
-    println("⇒ 是 Laughlin(1/3) ✅")
-else
-    println("⇒ 不是理想 Laughlin（或被其它项轻微混合）❌")
-end
+println("⟨H_V3⟩ = ", E_V3)
+println("overlap with ker(H_V1) = ", overlap2_1)
+println("overlap with ker(H_V3) = ", overlap2_3)

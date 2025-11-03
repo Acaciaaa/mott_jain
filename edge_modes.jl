@@ -1,7 +1,9 @@
 include(joinpath(@__DIR__, ".", "KLcommon.jl"))
 include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
+include(joinpath(@__DIR__, ".", "pad_su3.jl"))
 using .KLcommon
 using .JAINcommon
+using .PADsu3
 using FuzzifiED
 using FuzzifiED.Fuzzifino
 using LinearAlgebra
@@ -33,6 +35,17 @@ function hemisphere_alpha(P)
         α_heavy = hemisphere_amp_single(P.nmh)
         alpha_f = vcat(repeat(α_light, outer = P.nfl), α_heavy)
         return alpha_f
+    elseif P.name == :PADsu3
+        alpha_f = Float64[]
+        let αm = hemisphere_amp_single(P.nm1)
+            for k in 1:P.nm1
+                for _ in 1:P.nf1
+                    push!(alpha_f, αm[k])
+                end
+            end
+        end
+        append!(alpha_f, hemisphere_amp_single(P.nm0))
+        return alpha_f
     end
 end
 
@@ -52,6 +65,11 @@ function quantuminfo_a(P)
             ]
         qnf_a = QNOffd[]
         Q_tot = 3*P.nml
+
+    elseif P.name == :PADsu3
+        qnd_a = P.qnd
+        qnf_a = QNOffd[]
+        Q_tot = 3*P.nm1
     end
 
     L2cap = 40   # 2Lz_A 扫描范围
@@ -66,11 +84,11 @@ function quantuminfo_a(P)
     return qnd_a, qnf_a, secd_lst, secf_lst
 end
 
-function calculate_entanglement(P)
+function calculate_entanglement(P, μ)
     qnd_a, qnf_a, secd_lst, secf_lst = quantuminfo_a(P)
     if P.name == :KL
         alpha_f, alpha_b = hemisphere_alpha(P)
-        bestst, bestbs, bestE, bestR, bestZ = KLcommon.ground_state(P, 2.0)
+        bestst, bestbs, bestE, bestR, bestZ = KLcommon.ground_state(P, μ)
         ent = GetEntSpec(
             bestst, bestbs, secd_lst, secf_lst;
             qnd_a=qnd_a, qnf_a=qnf_a,
@@ -79,7 +97,15 @@ function calculate_entanglement(P)
             )
     elseif P.name == :JAINsu2u1
         alpha_f = hemisphere_alpha(P)
-        bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, 0.8, 0.05)
+        bestst, bestbs, bestE, bestR, bestZ = JAINcommon.ground_state_su2u1(P, μ, 0.05)
+        ent = GetEntSpec(
+            bestst, bestbs, secd_lst, secf_lst;
+            qnd_a=qnd_a, qnf_a=qnf_a,
+            amp_oa=ComplexF64.(alpha_f)
+            )
+    elseif P.name == :PADsu3
+        alpha_f = hemisphere_alpha(P)
+        bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
         ent = GetEntSpec(
             bestst, bestbs, secd_lst, secf_lst;
             qnd_a=qnd_a, qnf_a=qnf_a,
@@ -151,17 +177,18 @@ function plot_edge_modes_selected(pts, QA_sel; deg=Int[], ymin=0.0, ymax=10.0)
     if length(deg) == 0
         fig
     else
-        # txt = "deg(-9..-5) = [" * join(deg, ",") * "]"
-        # text!(ax, txt; position = Point2f(x_right, y_top), align = (:right, :top))
+        txt = "deg(-9..-5) = [" * join(deg, ",") * "]"
+        text!(ax, txt; position = Point2f(x_right, y_top), align = (:right, :top))
         fig
     end
 end
 
 #P = KLcommon.build_model(nmf=6)
-P = JAINcommon.build_model_su2u1(nml=4)
-pts, QA_sel = calculate_entanglement(P)
+#P = JAINcommon.build_model_su2u1(nml=4)
+P = PADsu3.build_model(nm1=4)
+pts, QA_sel = calculate_entanglement(P, 0.2)
 ymin=0.0
-ymax=35.0
+ymax=10.0
 deg, lz_used = count_degeneracies_selected(pts; lz_range = -15:15, ymin=ymin, ymax=ymax)
 @info "Degeneracies for Lz=-9..-5, ξ∈($ymin,$ymax), QA=$QA_sel" lz_used deg
 display(plot_edge_modes_selected(pts, QA_sel; deg=deg, ymin=ymin, ymax=ymax))

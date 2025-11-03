@@ -1,7 +1,5 @@
-include(joinpath(@__DIR__, ".", "KLcommon.jl"))
-include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
-using .KLcommon
-using .JAINcommon
+include(joinpath(@__DIR__, "pad_su3.jl"))
+using .PADsu3
 using FuzzifiED
 using FuzzifiED.Fuzzifino
 using LinearAlgebra
@@ -20,15 +18,20 @@ function avg_nf_for_mu(P, μ::Float64)
         op_N  = Operator(bestbs, JAINcommon.GetPolTermsMixed(P.nm_vec, Diagonal([1.0, 1.0, 1.0, 0.0])); red_q=1)
         N_exp = real(bestst' * op_N * bestst)
         n_avg = N_exp / P.nml
+    elseif P.name == :PADsu3
+        bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
+        op_N  = Operator(bestbs, GetPolTerms(P.nm1, P.nf1); red_q=1)
+        N_exp = real(bestst' * op_N * bestst)
+        n_avg = N_exp / P.nm1
     end
     return n_avg, N_exp
 end
 
 # ==== 4) 扫 μ 并画图 ====
 #P = KLcommon.build_model(nmf=4)
-P = JAINcommon.build_model_su2u1(nml=4)
-μlower = 0.0
-μupper = 0.8
+P = PADsu3.build_model(nm1=4)
+μlower = -0.2
+μupper = 0.2
 mus = collect(range(μlower, μupper, length=10))
 nf_avg_list = Float64[]; Nf_list = Float64[]
 for μ in mus
@@ -43,7 +46,7 @@ ax  = Axis(fig[1, 1];
     ylabel = "⟨n_123⟩",
     title  = "light fermion density vs μ",
     aspect = 1, 
-    limits = ((μlower, μupper), (-1.0, 4.0))   
+    limits = ((μlower, μupper), (0.0, 3.0))   
 )
 
 lines!(ax, mus, nf_avg_list, linewidth = 2)

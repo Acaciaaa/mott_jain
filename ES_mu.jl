@@ -1,38 +1,54 @@
-include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
-using .JAINcommon
+include(joinpath(@__DIR__, ".", "pad_su3.jl"))
+using .PADsu3
 using FuzzifiED
+using FuzzifiED.Fuzzifino
 using LinearAlgebra
-using SpecialFunctions 
+using SpecialFunctions
 using CairoMakie
+using Printf
 
-function plot_singlet_gap_vs_mu(mus::AbstractVector{<:Real}; k::Int=30)
-    x = Float64.(mus)
-    y = Float64[]
-    for μ in x
-        ΔE, info = JAINcommon.singlet_gap(P, μ; k=k)
-        if info === nothing
-            @warn "μ=$(μ): 没找到 l=0,s=0 态（k太小？）"
-            push!(y, NaN)
-        else
-            push!(y, ΔE * sqrt(P.nml))
-            @info "μ=$(round(μ,digits=3))  ΔE_S=$(round(ΔE,digits=6))  sector=(R=$(info[5]),Z=$(info[6]))  <L2>=$(info[7])  <C2>=$(info[8])"
-        end
-    end
+if_draw = true
+μlower = -0.2
+μupper = 0.2
+μs = collect(range(μlower, μupper, length=40)) 
+k = 20
 
-    fig = Figure(size=(650,650))
-    ax  = Axis(fig[1,1];
-        xlabel = "μ",
-        ylabel = "ΔE_S · √nml",
-        title  = "Singlet gap vs μ",
+if if_draw
+    fig = Figure(size=(650,650)) 
+    ax = Axis(fig[1,1]; 
+        xlabel = "μ", 
+        ylabel = "ΔE_S · √nml", 
+        title = "Singlet gap vs μ", 
         aspect = 1,
-        limits = ((minimum(x), maximum(x)), (0, maximum(skipmissing(y))*1.1))
-    )
-    lines!(ax, x, y, linewidth=2)
-    fig
+        ) 
 end
 
-P = JAINcommon.build_model_su2u1(nml=4)
-redirect_stdout(devnull) do
-    mus = collect(range(0.0, 1.0, length=20))
-    display(plot_singlet_gap_vs_mu(mus; k=200))
+io = open("run.log", "a")
+atexit(() -> close(io))
+for nm1 in [7]
+    local P = PADsu3.build_model(nm1=nm1)
+    Δs = Float64[]
+    for μ in μs 
+        local results = PADsu3.lowest_k_states(P, μ, k)
+        E0 = results[1][1] 
+        tol = √(eps(Float64)) 
+        idx_singlet = nothing 
+        for j in 2:lastindex(results) 
+            r = results[j] 
+            if abs(r[2]) < tol && abs(r[3]) < tol 
+                idx_singlet = j 
+                break
+            end
+        end 
+        ΔE = isnothing(idx_singlet) ? -1.0 : (results[idx_singlet][1] - E0) 
+        # @printf("%.7f\n", μ)
+        @printf("%.7f\n", ΔE)
+        @printf(io, "%.7f\n", ΔE)
+        flush(io)
+        push!(Δs, ΔE*sqrt(P.nm1)) 
+    end 
+
+    if_draw && lines!(ax, μs, Δs; linewidth=2, label="nm1 = $nm1"); scatter!(ax, μs, Δs; markersize=10) 
 end
+
+if_draw && axislegend(ax; position=:rb); fig
