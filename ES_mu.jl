@@ -25,7 +25,7 @@ end
 
 io = open("run.log", "a")
 atexit(() -> close(io))
-for nm1 in [7]
+for nm1 in [5]
     local P = PADsu3.build_model(nm1=nm1)
     Δs = Float64[]
     for μ in μs 

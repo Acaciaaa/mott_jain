@@ -95,7 +95,7 @@ end
 
 #method_minimize_singlet_gap_distance()
 #tool_write_results(6)
-method_minimize_cost_function(6)
+#method_minimize_cost_function(6)
 
 # P = PADsu3.build_model(nm1=5)
 # k = 30
