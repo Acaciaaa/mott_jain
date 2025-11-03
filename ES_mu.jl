@@ -25,7 +25,7 @@ end
 
 io = open("run.log", "a")
 atexit(() -> close(io))
-for nm1 in [5]
+for nm1 in [8]
     local P = PADsu3.build_model(nm1=nm1)
     Δs = Float64[]
     for μ in μs 
@@ -42,7 +42,7 @@ for nm1 in [5]
         end 
         ΔE = isnothing(idx_singlet) ? -1.0 : (results[idx_singlet][1] - E0) 
         # @printf("%.7f\n", μ)
-        @printf("%.7f\n", ΔE)
+        #@printf("%.7f\n", ΔE)
         @printf(io, "%.7f\n", ΔE)
         flush(io)
         push!(Δs, ΔE*sqrt(P.nm1)) 
