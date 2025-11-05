@@ -1,5 +1,7 @@
 include(joinpath(@__DIR__, "pad_su3.jl"))
+include(joinpath(@__DIR__, "pad_su2.jl"))
 using .PADsu3
+using .PADsu2
 using FuzzifiED
 using FuzzifiED.Fuzzifino
 using LinearAlgebra
@@ -18,8 +20,9 @@ function avg_nf_for_mu(P, μ::Float64)
         op_N  = Operator(bestbs, JAINcommon.GetPolTermsMixed(P.nm_vec, Diagonal([1.0, 1.0, 1.0, 0.0])); red_q=1)
         N_exp = real(bestst' * op_N * bestst)
         n_avg = N_exp / P.nml
-    elseif P.name == :PADsu3
-        bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
+    elseif P.name in (:PADsu3, :PADsu2)
+        #bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
+        bestst, bestbs, bestE, bestR, bestZ = PADsu2.ground_state(P, μ)
         op_N  = Operator(bestbs, GetPolTerms(P.nm1, P.nf1); red_q=1)
         N_exp = real(bestst' * op_N * bestst)
         n_avg = N_exp / P.nm1
@@ -29,7 +32,8 @@ end
 
 # ==== 4) 扫 μ 并画图 ====
 #P = KLcommon.build_model(nmf=4)
-P = PADsu3.build_model(nm1=4)
+#P = PADsu3.build_model(nm1=4)
+P = PADsu2.build_model(nm1=4)
 μlower = -0.2
 μupper = 0.2
 mus = collect(range(μlower, μupper, length=10))

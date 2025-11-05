@@ -9,7 +9,7 @@ using Printf
 
 μc = 0.096
 k = 30
-P = PADsu3.build_model(nm1=7)
+P = PADsu3.build_model(nm1=6)
 results = PADsu3.lowest_k_states(P, μc, k) #已经排好序了 
 E0 = results[1][1]
 Eref = filter(st -> st[2] ≈ 6 && st[3] ≈ 0, results)[1][1]

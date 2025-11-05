@@ -1,9 +1,11 @@
 include(joinpath(@__DIR__, ".", "KLcommon.jl"))
 include(joinpath(@__DIR__, ".", "JAINcommon.jl"))
 include(joinpath(@__DIR__, ".", "pad_su3.jl"))
+include(joinpath(@__DIR__, ".", "pad_su2.jl"))
 using .KLcommon
 using .JAINcommon
 using .PADsu3
+using .PADsu2
 using FuzzifiED
 using FuzzifiED.Fuzzifino
 using LinearAlgebra
@@ -35,7 +37,7 @@ function hemisphere_alpha(P)
         α_heavy = hemisphere_amp_single(P.nmh)
         alpha_f = vcat(repeat(α_light, outer = P.nfl), α_heavy)
         return alpha_f
-    elseif P.name == :PADsu3
+    elseif P.name in (:PADsu3, :PADsu2)
         alpha_f = Float64[]
         let αm = hemisphere_amp_single(P.nm1)
             for k in 1:P.nm1
@@ -66,7 +68,7 @@ function quantuminfo_a(P)
         qnf_a = QNOffd[]
         Q_tot = 3*P.nml
 
-    elseif P.name == :PADsu3
+    elseif P.name in (:PADsu3, :PADsu2)
         qnd_a = P.qnd
         qnf_a = QNOffd[]
         Q_tot = 3*P.nm1
@@ -103,9 +105,10 @@ function calculate_entanglement(P, μ)
             qnd_a=qnd_a, qnf_a=qnf_a,
             amp_oa=ComplexF64.(alpha_f)
             )
-    elseif P.name == :PADsu3
+    elseif P.name in (:PADsu3, :PADsu2)
         alpha_f = hemisphere_alpha(P)
-        bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
+        #bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
+        bestst, bestbs, bestE, bestR, bestZ = PADsu2.ground_state(P, μ)
         ent = GetEntSpec(
             bestst, bestbs, secd_lst, secf_lst;
             qnd_a=qnd_a, qnf_a=qnf_a,
@@ -185,10 +188,11 @@ end
 
 #P = KLcommon.build_model(nmf=6)
 #P = JAINcommon.build_model_su2u1(nml=4)
-P = PADsu3.build_model(nm1=4)
+#P = PADsu3.build_model(nm1=4)
+P = PADsu2.build_model(nm1=4)
 pts, QA_sel = calculate_entanglement(P, 0.2)
 ymin=0.0
-ymax=10.0
+ymax=35.0
 deg, lz_used = count_degeneracies_selected(pts; lz_range = -15:15, ymin=ymin, ymax=ymax)
 @info "Degeneracies for Lz=-9..-5, ξ∈($ymin,$ymax), QA=$QA_sel" lz_used deg
 display(plot_edge_modes_selected(pts, QA_sel; deg=deg, ymin=ymin, ymax=ymax))

@@ -9,6 +9,7 @@ using Printf
 using XLSX
 using DataFrames
 using Statistics
+BLAS.set_num_threads(8)
 
 function method_minimize_singlet_gap_distance()
     xlsx_file = "data/singlet_gap.xlsx"
@@ -28,7 +29,6 @@ function method_minimize_singlet_gap_distance()
     row_mean = sum(Y, dims=2) ./ size(Y, 2)
     diffs    = Y .- row_mean
     var_pop  = vec(sum(diffs .^ 2, dims=2) ./ size(Y, 2))
-    #println(var_pop)
 
     imin  = argmin(var_pop)
     x_min = x[imin]
@@ -94,7 +94,7 @@ function tool_write_results(nm1)
 end
 
 #method_minimize_singlet_gap_distance()
-#tool_write_results(6)
+#tool_write_results(7)
 #method_minimize_cost_function(6)
 
 # P = PADsu3.build_model(nm1=5)
