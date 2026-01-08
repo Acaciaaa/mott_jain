@@ -7,7 +7,9 @@ using CairoMakie
 using WignerSymbols
 FuzzifiED.ElementType = Float64 
 FuzzifiED.SilentStd = true
+import Base: ≈
 ≈(x, y) = abs(x - y) < √(eps(Float64))
+
 
 Base.@kwdef mutable struct ModelParams
     name::Symbol
@@ -30,6 +32,8 @@ Base.@kwdef mutable struct ModelParams
     tms_V1
     tms_l2
     tms_c2
+    n0
+    nf
 end
 
 PadQNDiag(qnd :: QNDiag, nol :: Int64, nor :: Int64) = QNDiag(qnd.name, [ fill(0, nol) ; qnd.charge ; fill(0, nor) ], qnd.modul)
@@ -69,7 +73,8 @@ function build_model(; nm1::Int)
     f0 = PadSphereObs(GetElectronObs(nm0, 1, 1), no1)
     f = [GetElectronObs(nm1, nf1, f) for f = 1 : nf1]
     n0 = f0' * f0 
-    ne = GetDensityObs(nm1, nf1) + 3 * n0
+    nf = GetDensityObs(nm1, nf1)
+    ne = nf + 3 * n0
     tms_hop = SimplifyTerms(GetIntegral(f0' * f[1] * f[2] * f[3]))
     tms_int = SimplifyTerms(GetIntegral(ne * ne))
     tms_V1 = SimplifyTerms(GetIntegral(n0 * Laplacian(n0)))
@@ -92,36 +97,39 @@ function build_model(; nm1::Int)
     tms_c2 = GetC2Terms(nm1, nf1, :SU)
     
     return ModelParams(; name=:PADsu3, nm1, s, nf1, no1, nm0, nf0, no0, no, qnd, qnf, cfs, 
-    tms_hop, tms_int, tms_f123, tms_V1, tms_l2, tms_c2)
+    tms_hop, tms_int, tms_f123, tms_V1, tms_l2, tms_c2, n0, nf)
 end
 
-make_tms_hmt(P::ModelParams, μ::Float64) = SimplifyTerms(
-    0.5 * P.tms_int
-    + 1.0 * P.tms_V1
-    - 0.8 * (P.tms_hop + P.tms_hop')
-    + μ * P.tms_f123
-)
+function make_tms_hmt(
+    P::ModelParams,
+    μ::Float64,
+    U0::Union{Float64,AbstractVector{<:Real}} = 0.5,
+    V1::Float64 = 1.0,
+    t::Float64 = 0.8,)
+    other_terms = V1 * P.tms_V1 - t * (P.tms_hop + P.tms_hop') + μ * P.tms_f123
+    if U0 isa Float64
+        return SimplifyTerms(U0 * P.tms_int + other_terms)
+    else
+        Uf, Uf0, U0 = Float64.(U0)
+        return SimplifyTerms(
+            Uf * SimplifyTerms(GetIntegral(P.nf * P.nf)) +
+            Uf0 * SimplifyTerms(GetIntegral(P.nf * P.n0)) +
+            U0 * SimplifyTerms(GetIntegral(P.n0 * P.n0)) +
+            other_terms
+        )
+    end
+end
 
-function ground_state(P::ModelParams, μ::Float64, k::Int=1;
+function ground_state(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=1;
                             check_hermiticity::Bool=true,
                             tol_rel::Float64=1e-12,
                             symmetrize::Bool=true)
-    tms_hmt = make_tms_hmt(P, μ)
+    tms_hmt = make_tms_hmt(P, μ, U0, V1, t)
     bestE = Inf; bestst = nothing; bestbs = nothing; bestR = 0; bestZ = 0
     for Z in (1,-1), R in (-1,1)
         bs = Basis(P.cfs[0], [Z, R], P.qnf)
-        H  = Operator(bs, tms_hmt)
-
-        A  = Matrix(OpMat(H))
-
-        if check_hermiticity
-            rel = opnorm(A - A') / max(opnorm(A), eps())
-            @debug "μ=$μ (Z,R)=($Z,$R) rel_nonHerm=$rel"
-            @assert rel ≤ max(tol_rel, 1e-14) "H not Hermitian enough: rel=$rel at (Z,R)=($Z,$R)"
-        end
-
-        A  = symmetrize ? (A + A')/2 : A
-        vals, vecs = eigen(Hermitian(A))
+        hmt_mat = OpMat(Operator(bs, tms_hmt))
+        vals, vecs = GetEigensystem(hmt_mat, k)
 
         if vals[1] < bestE
             bestE, bestst, bestbs, bestR, bestZ = vals[1], vecs[:,1], bs, R, Z
@@ -131,11 +139,12 @@ function ground_state(P::ModelParams, μ::Float64, k::Int=1;
     return bestst, bestbs, bestE, bestR, bestZ
 end
 
-function lowest_k_states(P::ModelParams, μ::Float64, k::Int=30)
+function lowest_k_states(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=30)
     results = []
-    for Sz in 0:1, Z in (1, -1), R in (1, -1) 
+    #for Sz in 0:1, Z in (1, -1), R in (1, -1) 
+    for Sz in (0), Z in (1, -1), R in (1, -1) 
         bs = Basis(P.cfs[Sz], [Z, R], P.qnf)
-        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ)))
+        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
         n = hmt_mat.dimd
         
         if n == 0
@@ -156,7 +165,7 @@ function lowest_k_states(P::ModelParams, μ::Float64, k::Int=30)
         l2_mat = OpMat(Operator(bs, P.tms_l2)) 
         c2_mat = OpMat(Operator(bs, P.tms_c2)) 
         l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
-        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)] 
+        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
         for i in eachindex(enrg) 
             #push!(results, (E=enrg[i], L2=l2_val[i], C2=c2_val[i], Sz=Sz, R=R, Z=Z, i=i))
             push!(results, vcat(round.([enrg[i], l2_val[i], c2_val[i]]; digits=7), Sz))
@@ -166,13 +175,50 @@ function lowest_k_states(P::ModelParams, μ::Float64, k::Int=30)
     return results
 end
 
+function for_generator(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=10)
+    results = []
+    bss = Dict{Vector{Int64}, Basis}()
+    for Sz in (0), Z in (1, -1), R in (1, -1) 
+        bs = Basis(P.cfs[Sz], [Z, R], P.qnf)
+        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
+        n = hmt_mat.dimd
+        
+        if n == 0
+            continue
+        elseif n == 1
+            hmatrix = Matrix(hmt_mat)
+            enrg = [hmatrix[1,1]]
+            st   = ones(eltype(hmatrix), 1, 1)
+        elseif n ≤ 128
+            hmatrix = Matrix(hmt_mat)
+            vals, vecs = eigen(hmatrix)
+            k_req =  min(k, n)
+            idx   =  sortperm(vals)[1:k_req]
+            enrg, st = vals[idx], vecs[:, idx]
+        else
+            enrg, st = GetEigensystem(hmt_mat, k)
+        end
+        l2_mat = OpMat(Operator(bs, P.tms_l2)) 
+        c2_mat = OpMat(Operator(bs, P.tms_c2)) 
+        l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
+        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
+        bss[[Sz, Z, R]] = bs
+        for i in eachindex(enrg) 
+            push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i], Sz, Z, R])
+        end 
+    end 
+    sort!(results, by = st -> real(st[1]))
+    return results, bss
+end
+
 using JLD2, Dates
-function write_results(P::ModelParams, mus, k::Int=30, path::AbstractString = "data/results_$(P.nm1).jld2")
+function write_results(P::ModelParams, mus, U0, V1::Float64=1.0, t::Float64=0.8,
+                        k::Int=30, path::AbstractString = "data/results_$(P.nm1).jld2")
     mkpath(dirname(path))
     mus_vec = collect(round.(Float64.(mus); digits=4))
     results_vec = Vector{Vector{Vector{Float64}}}(undef, length(mus_vec))
     for (i, μ) in enumerate(mus_vec)
-        results_vec[i] = lowest_k_states(P, μ, k)
+        results_vec[i] = lowest_k_states(P, μ, U0, V1, t,k)
     end
     meta = Dict{String,Any}("nml"=>P.nm1, "k"=>k, "count_mu"=>length(mus_vec), "updated_at"=>string(Dates.now()))
     @save path mus=mus_vec results=results_vec meta
@@ -191,4 +237,40 @@ function read_results(nm1, path::AbstractString = "data/results_$(nm1).jld2")
 end
 
 
+function lowest_k_states_adjoint(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=30)
+    results = []
+    #for Sz in 0:1, Z in (1, -1), R in (1, -1) 
+    for Sz in (1), Z in (1, -1)
+        bs = Basis(Confs(P.no, [P.no1, 0, 2, 0], P.qnd), [Z], 
+            [PadQNOffd(GetRotyQNOffd(P.nm1, P.nf1), 0, P.no0) * PadQNOffd(GetRotyQNOffd(P.nm0, 1), P.no1, 0)])
+        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
+        n = hmt_mat.dimd
+        
+        if n == 0
+            continue
+        elseif n == 1
+            hmatrix = Matrix(hmt_mat)
+            enrg = [hmatrix[1,1]]
+            st   = ones(eltype(hmatrix), 1, 1)
+        elseif n ≤ 128
+            hmatrix = Matrix(hmt_mat)
+            vals, vecs = eigen(hmatrix)
+            k_req =  min(k, n)
+            idx   =  sortperm(vals)[1:k_req]
+            enrg, st = vals[idx], vecs[:, idx]
+        else
+            enrg, st = GetEigensystem(hmt_mat, k)
+        end
+        l2_mat = OpMat(Operator(bs, P.tms_l2)) 
+        c2_mat = OpMat(Operator(bs, P.tms_c2)) 
+        l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
+        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
+        for i in eachindex(enrg) 
+            #push!(results, (E=enrg[i], L2=l2_val[i], C2=c2_val[i], Sz=Sz, R=R, Z=Z, i=i))
+            push!(results, vcat(round.([enrg[i], l2_val[i], c2_val[i]]; digits=7), Sz))
+        end 
+    end 
+    sort!(results, by = st -> real(st[1]))
+    return results
+end
 end

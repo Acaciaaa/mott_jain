@@ -1,5 +1,7 @@
 include(joinpath(@__DIR__, ".", "pad_su3.jl"))
+include(joinpath(@__DIR__, ".", "pad_su2.jl"))
 using .PADsu3
+using .PADsu2
 using FuzzifiED
 using FuzzifiED.Fuzzifino
 using LinearAlgebra
@@ -49,8 +51,8 @@ function method_minimize_singlet_gap_distance()
     fig
 end
 
-function method_minimize_cost_function(nm1)
-    mus, results_vec = PADsu3.read_results(nm1)
+function method_minimize_cost_function_su3(nm1)
+    mus, results_vec = PADsu3.read_results(nm1,"data/results_$(nm1).jld2")
     Qs      = similar(mus)
     factors = similar(mus)
     for (i, mu) in enumerate(mus)
@@ -78,6 +80,44 @@ function method_minimize_cost_function(nm1)
 
     lines!(ax, mus, Qs)
     vlines!(ax, [μc]; linestyle = :dash)
+    text!(ax, @sprintf("min at μc=%.4f", μc);
+        position = (μc, Qs[i_min]),
+        align = (:left, :bottom),)
+    #display(fig)
+    @info μc
+    @info Qs[i_min]
+    return μc,Qs[i_min]
+end
+
+function method_minimize_cost_function_su2(nm1)
+    mus, results_vec = PADsu2.read_results(nm1)
+    Qs      = similar(mus)
+    factors = similar(mus)
+    for (i, mu) in enumerate(mus)
+        results = results_vec[i]
+        E0 = results[1][1]
+        enrg_cal = [
+            filter(st -> st[2] ≈ 2 && st[3] ≈ 0, results)[1][1] - filter(st -> st[2] ≈ 0 && st[3] ≈ 0, results)[2][1], # ∂S - S
+            filter(st -> st[2] ≈ 2 && st[3] ≈ 2, results)[1][1] - E0, # J
+            filter(st -> st[2] ≈ 2 && st[3] ≈ 2, results)[2][1] - E0, # ϵ∂J
+            filter(st -> st[2] ≈ 6 && st[3] ≈ 2, results)[1][1] - E0, # ∂J
+            filter(st -> st[2] ≈ 6 && st[3] ≈ 0, results)[1][1] - E0 # T
+        ]
+        @info [mu;enrg_cal]
+        dim_cal = Float64[1, 2, 3, 3, 3]
+        factor = (enrg_cal' * dim_cal) / (dim_cal' * dim_cal)
+        factors[i] = factor
+        Q = sqrt(mean(((enrg_cal ./ factor) .- dim_cal) .^ 2))
+        Qs[i] = Q
+    end
+    i_min = argmin(Qs)
+    μc = mus[i_min]
+
+    fig = Figure()
+    ax = Axis(fig[1, 1], xlabel = "μ", ylabel = "Q")
+
+    lines!(ax, mus, Qs)
+    vlines!(ax, [μc]; linestyle = :dash)
     text!(ax, @sprintf("min at μc=%.3f", μc);
         position = (μc, Qs[i_min]),
         align = (:left, :bottom),)
@@ -87,15 +127,27 @@ function method_minimize_cost_function(nm1)
 end
 
 function tool_write_results(nm1)
-    k = 30
+    k = 7
     P = PADsu3.build_model(nm1=nm1)
-    mus = collect(range(0.08, 0.15, length=70)) 
-    PADsu3.write_results(P, mus, k)
+    #P = PADsu2.build_model(nm1=nm1)
+    mus = collect(range(0.06, 0.09, length=30))
+    PADsu3.write_results(P, mus,  0.4,0.9,0.4,k)
+    #PADsu2.write_results(P, mus, k)
 end
 
+
+
+
 #method_minimize_singlet_gap_distance()
-#tool_write_results(7)
-#method_minimize_cost_function(6)
+for i in 3:5
+    tool_write_results(i)
+end
+for i in 3:5
+    method_minimize_cost_function_su3(i)
+end
+
+#method_minimize_cost_function_su2(3)
+
 
 # P = PADsu3.build_model(nm1=5)
 # k = 30

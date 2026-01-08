@@ -42,6 +42,26 @@ PadQNOffd(qnf :: QNOffd, nol :: Int64, nor :: Int64) = QNOffd(
 PadTerm(tm :: Term, nol :: Int64) = Term(tm.coeff, [ isodd(i) ? tm.cstr[i] : tm.cstr[i] + nol for i in eachindex(tm.cstr)])
 PadTerm(tms :: Terms, nol :: Int64) = PadTerm.(tms, nol)
 PadSphereObs(obs :: SphereObs, nol :: Int64) = SphereObs(obs.s2, obs.l2m, (l, m) -> PadTerm(obs.get_comp(l, m), nol))
+function GetC2Termshere(nm, nf)
+    tms_c2 = Term[]
+    for m1 = 1 : nm, m2 = 1 : nm 
+        for f1 = 1 : 2, f2 = 1 : 2 
+            o1 = f1 + nf * (m1 - 1)
+            o2 = f2 + nf * (m1 - 1)
+            o3 = f2 + nf * (m2 - 1)
+            o4 = f1 + nf * (m2 - 1)
+            tms_c2 += Terms(1 / 2, [1, o1, 0, o2, 1, o3, 0, o4])
+
+            o1 = f1 + nf * (m1 - 1)
+            o2 = f1 + nf * (m1 - 1)
+            o3 = f2 + nf * (m2 - 1)
+            o4 = f2 + nf * (m2 - 1)
+            tms_c2 -= Terms(1 / (2 * 2), [1, o1, 0, o2, 1, o3, 0, o4])
+        end
+    end
+
+    return SimplifyTerms(tms_c2)
+end
 
 function build_model(; nm1::Int)
     s = (nm1 - 1) / 2
@@ -93,7 +113,7 @@ function build_model(; nm1::Int)
     tms_lp = tms_lp1 + tms_lp0 
     tms_lm = tms_lp'
     tms_l2 = SimplifyTerms(tms_lz * tms_lz - tms_lz + tms_lp * tms_lm)
-    tms_c2 = GetC2Terms(nm1, nf1, :SU)
+    tms_c2 = GetC2Termshere(nm1, nf1)
 
     return ModelParams(; name=:PADsu2, nm1, s, nf1, no1, nm0, nf0, no0, no, qnd, qnf, cfs, 
     tms_hop, tms_int, tms_br_discrete, tms_br_square, tms_f123, tms_V1, tms_l2, tms_c2)
@@ -172,5 +192,31 @@ function lowest_k_states(P::ModelParams, μ::Float64, k::Int=30)
     sort!(results, by = st -> real(st[1]))
     return results
 end
+
+
+using JLD2, Dates
+function write_results(P::ModelParams, mus, k::Int=30, path::AbstractString = "data_square/results_$(P.nm1).jld2")
+    mkpath(dirname(path))
+    mus_vec = collect(round.(Float64.(mus); digits=4))
+    results_vec = Vector{Vector{Vector{Float64}}}(undef, length(mus_vec))
+    for (i, μ) in enumerate(mus_vec)
+        results_vec[i] = lowest_k_states(P, μ, k)
+    end
+    meta = Dict{String,Any}("nml"=>P.nm1, "k"=>k, "count_mu"=>length(mus_vec), "updated_at"=>string(Dates.now()))
+    @save path mus=mus_vec results=results_vec meta
+    println("✅ Saved $(length(mus_vec)) μ values (rounded to 4 decimals) to $path")
+end
+
+function read_results(nm1, path::AbstractString = "data_square/results_$(nm1).jld2")
+    @assert isfile(path) "未找到文件"
+    obj = JLD2.load(path)
+    @assert haskey(obj, "mus") "文件缺少 'mus' 字段"
+    @assert haskey(obj, "results") "文件缺少 'results' 字段"
+    mus         = obj["mus"]::Vector{Float64}
+    results_vec = obj["results"]::Vector{Vector{Vector{Float64}}}
+    @assert length(mus) == length(results_vec) "文件损坏 mus 与 results 长度不一致"
+    return mus, results_vec
+end
+
 
 end

@@ -21,8 +21,8 @@ function avg_nf_for_mu(P, μ::Float64)
         N_exp = real(bestst' * op_N * bestst)
         n_avg = N_exp / P.nml
     elseif P.name in (:PADsu3, :PADsu2)
-        #bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
-        bestst, bestbs, bestE, bestR, bestZ = PADsu2.ground_state(P, μ)
+        bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ,[0.4,1.2,4.0],0.9,0.2)
+        #bestst, bestbs, bestE, bestR, bestZ = PADsu2.ground_state(P, μ)
         op_N  = Operator(bestbs, GetPolTerms(P.nm1, P.nf1); red_q=1)
         N_exp = real(bestst' * op_N * bestst)
         n_avg = N_exp / P.nm1
@@ -32,10 +32,10 @@ end
 
 # ==== 4) 扫 μ 并画图 ====
 #P = KLcommon.build_model(nmf=4)
-#P = PADsu3.build_model(nm1=4)
-P = PADsu2.build_model(nm1=4)
-μlower = -0.2
-μupper = 0.2
+P = PADsu3.build_model(nm1=5)
+#P = PADsu2.build_model(nm1=5)
+μlower = -0.1
+μupper = 0.15
 mus = collect(range(μlower, μupper, length=10))
 nf_avg_list = Float64[]; Nf_list = Float64[]
 for μ in mus

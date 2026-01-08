@@ -3,6 +3,7 @@ using DataFrames
 using CairoMakie
 
 xlsx_file = "data/singlet_gap.xlsx"
+#xlsx_file = "data_square/singlet_gap.xlsx"
 sheetname = "zoomout"
 
 tbl = XLSX.readtable(xlsx_file, sheetname; infer_eltypes=true)
@@ -31,4 +32,4 @@ for j in 2:ncol(df)
 end
 
 axislegend(ax; position=:rb)
-fig
+save("/Users/ruiqi/Documents/tmp/mott_jain/singlet_gap.png", fig)

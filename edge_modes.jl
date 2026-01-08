@@ -107,8 +107,8 @@ function calculate_entanglement(P, μ)
             )
     elseif P.name in (:PADsu3, :PADsu2)
         alpha_f = hemisphere_alpha(P)
-        #bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ)
-        bestst, bestbs, bestE, bestR, bestZ = PADsu2.ground_state(P, μ)
+        bestst, bestbs, bestE, bestR, bestZ = PADsu3.ground_state(P, μ,[0.4,1.2,4.0],0.9,0.2)
+        #bestst, bestbs, bestE, bestR, bestZ = PADsu2.ground_state(P, μ)
         ent = GetEntSpec(
             bestst, bestbs, secd_lst, secf_lst;
             qnd_a=qnd_a, qnf_a=qnf_a,
@@ -188,11 +188,11 @@ end
 
 #P = KLcommon.build_model(nmf=6)
 #P = JAINcommon.build_model_su2u1(nml=4)
-#P = PADsu3.build_model(nm1=4)
-P = PADsu2.build_model(nm1=4)
-pts, QA_sel = calculate_entanglement(P, 0.2)
+P = PADsu3.build_model(nm1=4)
+#P = PADsu2.build_model(nm1=4)
+pts, QA_sel = calculate_entanglement(P, 0.15)
 ymin=0.0
-ymax=35.0
+ymax=10.0
 deg, lz_used = count_degeneracies_selected(pts; lz_range = -15:15, ymin=ymin, ymax=ymax)
 @info "Degeneracies for Lz=-9..-5, ξ∈($ymin,$ymax), QA=$QA_sel" lz_used deg
 display(plot_edge_modes_selected(pts, QA_sel; deg=deg, ymin=ymin, ymax=ymax))

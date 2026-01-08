@@ -182,7 +182,7 @@ st_dSprime, bs_dSprime, _ = find_state(2, 0, 3, "∂S'")
 # T (l2=6 c2=0 Rank 1)
 st_T, bs_T, _ = find_state(6, 0, 1, "T")
 # ∂∂S (l2=6 c2=0 Rank 2)
-st_ddS, bs_ddS, _ = find_state(6, 0, 1, "∂∂S")
+st_ddS, bs_ddS, _ = find_state(6, 0, 2, "∂∂S")
 
 tms_cand = make_lambda_candidates()
 vecs_op = []
@@ -208,96 +208,37 @@ print_coefficients()
 # ==============================================================================
 
 tms_Lambdaz = SimplifyTerms(coeffs' * tms_cand)
-# ==============================================================================
-# 矩方法投影 (Projection by Method of Moments)
-# 优点：不需要对角化，利用选择定则，精确且极快
-# ==============================================================================
+function remove_level_mixing()
+    op = Operator(bs_dS, bs_ddS, tms_Lambdaz)
+    v = op * st_dS
 
-function get_denom_by_moments(vec_tot, input_L, basis_system, tms_l2)
-    # 1. 构造 L^2 算符矩阵
-    # (如果是在循环里调用，建议在外面构造好 Op_L2 传进来，避免重复构造)
-    Op_L2 = Operator(basis_system, basis_system, tms_l2)
+    c1 = dot(st_T, v)
+    c2 = dot(st_ddS, v)
 
-    # 2. 确定可能存在的 Casimir 值 (λ = L(L+1))
-    # 根据选择定则: L_out = L_in - 1, L_in, L_in + 1
-    possible_Ls = [input_L - 1, input_L, input_L + 1]
-    filter!(l -> l >= 0, possible_Ls) # 去掉负数 (比如 0-1)
-    
-    # 转成 Casimir 值 λ
-    lambdas = [l * (l + 1.0) for l in possible_Ls]
-    n_vars = length(lambdas)
-    
-    # 3. 计算矩 (Moments)
-    # y0 = <v|v>
-    # y1 = <v|L^2|v>
-    # y2 = <v|(L^2)^2|v>
-    
-    # 0阶矩
-    y0 = dot(vec_tot, vec_tot) # 实数
-    
-    # 1阶矩
-    vec_L2 = Op_L2 * vec_tot
-    y1 = dot(vec_tot, vec_L2)
-    
-    # 2阶矩 (如果只有2个未知数就不需要这个，但为了通用可以算)
-    vec_L4 = Op_L2 * vec_L2
-    y2 = dot(vec_tot, vec_L4)
-    
-    # 4. 构建方程组 Ax = b
-    # x 是我们要求的 [weight_L_minus, weight_L, weight_L_plus]
-    
-    A = zeros(Float64, n_vars, n_vars)
-    b = zeros(Float64, n_vars)
-    
-    # 填充 A 和 b
-    # Row 1: sum x_i = y0
-    A[1, :] .= 1.0
-    b[1] = real(y0)
-    
-    if n_vars >= 2
-        # Row 2: sum λ_i * x_i = y1
-        A[2, :] = lambdas
-        b[2] = real(y1)
-    end
-    
-    if n_vars >= 3
-        # Row 3: sum λ_i^2 * x_i = y2
-        A[3, :] = lambdas .^ 2
-        b[3] = real(y2)
-    end
-    
-    # 5. 解方程
-    # 使用 Julia 的左除反斜杠求解
-    weights = A \ b
-    
-    # 6. 打包返回结果 (字典形式: Casimir -> Weight)
-    result_dict = Dict{Float64, Float64}()
-    for (i, lam) in enumerate(lambdas)
-        result_dict[lam] = weights[i]
-    end
-    
-    return result_dict
+    st_ddS_star = c1 .* st_T .+ c2 .* st_ddS
+    normalize!(st_ddS_star)
+    st_T_star = c2 .* st_T .- c1 .* st_ddS
+    normalize!(st_T_star)
+    return st_ddS_star, st_T_star
 end
+
+st_ddS_star,_ = remove_level_mixing()
+
+# 通用计算函数
 function calc_row(label_in, l_target, targets_list, input_tuple, all_results)
     (st_in, bs_in) = input_tuple
     bs_tgt = targets_list[1][2] # Use basis of first target
     op = Operator(bs_in, bs_tgt, tms_Lambdaz)
     v = op * st_in
 
-    l2_target = l_target * (l_target + 1)
-    relevant = filter(r -> abs(r[3]-l2_target)<TOL, all_results)
+    l_target2 = l_target * (l_target + 1)
+    relevant = filter(r -> abs(r[3]-l_target2)<TOL && abs(r[4])<TOL, all_results)
     
-    L_in_val = 0 # 默认为 S
-    if occursin("∂S", label_in) && !occursin("∂∂", label_in); L_in_val = 1; end
-    if occursin("□S", label_in); L_in_val = 0; end
-    if occursin("∂∂S", label_in) || occursin("T", label_in); L_in_val = 2; end
-    
-    # 2. 解方程得到所有分量的权重
-    weights_map = get_denom_by_moments(v, L_in_val, bs_tgt, P.tms_l2)
-    
-    # 3. 取出我们要的那个 Target L 的权重
-    # target_l2 是 Casimir 值 (0.0, 2.0, 6.0)
-    denom_sq = get(weights_map, Float64(l2_target), 0.0)
+    denom_sq = 0.0
+    for r in relevant
+        v_eig = r[2]
+        denom_sq += abs(dot(v_eig, v))^2
+    end
     
     # 3. 打印
     @printf "| %-8s | %-2d |" label_in l_target
@@ -330,7 +271,7 @@ calc_row("∂S", 0,
 
 # --- Row 3: ∂S -> ∂∂S(*) ---
 calc_row("∂S", 2, 
-    [("∂∂S(*)", bs_ddS, st_ddS)], 
+    [("∂∂S(*)", bs_ddS, st_ddS_star)], 
     (st_dS, bs_dS), results)
 
 # --- Row 4: □S -> ∂S, □∂S ---
@@ -341,6 +282,6 @@ calc_row("□S", 1,
 # --- Row 5: ∂∂S(*) -> ∂S, □∂S ---
 calc_row("∂∂S(*)", 1, 
     [("∂S", bs_dS, st_dS), ("□∂S", bs_boxdS, st_boxdS)], 
-    (st_ddS, bs_ddS), results)
+    (st_ddS_star, bs_ddS), results)
 
 println("|----------|----|---------------|---------------|--------|")
