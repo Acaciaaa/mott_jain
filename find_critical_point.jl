@@ -130,8 +130,8 @@ function tool_write_results(nm1)
     k = 7
     P = PADsu3.build_model(nm1=nm1)
     #P = PADsu2.build_model(nm1=nm1)
-    mus = collect(range(0.06, 0.09, length=30))
-    PADsu3.write_results(P, mus,  0.4,0.9,0.4,k)
+    mus = collect(range(0.06, 0.07, length=10))
+    PADsu3.write_results(P, mus,  0.4,1.0,0.3,k)
     #PADsu2.write_results(P, mus, k)
 end
 

@@ -168,7 +168,7 @@ function lowest_k_states(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Fl
         c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
         for i in eachindex(enrg) 
             #push!(results, (E=enrg[i], L2=l2_val[i], C2=c2_val[i], Sz=Sz, R=R, Z=Z, i=i))
-            push!(results, vcat(round.([enrg[i], l2_val[i], c2_val[i]]; digits=7), Sz))
+            push!(results, vcat(round.([enrg[i], l2_val[i], c2_val[i]]; digits=7), Sz, R, Z))
         end 
     end 
     sort!(results, by = st -> real(st[1]))
@@ -205,6 +205,42 @@ function for_generator(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Floa
         bss[[Sz, Z, R]] = bs
         for i in eachindex(enrg) 
             push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i], Sz, Z, R])
+        end 
+    end 
+    sort!(results, by = st -> real(st[1]))
+    return results, bss
+end
+
+function for_generator_J(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=10)
+    results = []
+    bss = Dict{Vector{Int64}, Basis}()
+    for Sz in (0), R in (1, -1) 
+        bs = Basis(Confs(P.no, [P.no1, 0, 2, 0], P.qnd), [R], [P.qnf[2]])
+        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
+        n = hmt_mat.dimd
+        
+        if n == 0
+            continue
+        elseif n == 1
+            hmatrix = Matrix(hmt_mat)
+            enrg = [hmatrix[1,1]]
+            st   = ones(eltype(hmatrix), 1, 1)
+        elseif n ≤ 128
+            hmatrix = Matrix(hmt_mat)
+            vals, vecs = eigen(hmatrix)
+            k_req =  min(k, n)
+            idx   =  sortperm(vals)[1:k_req]
+            enrg, st = vals[idx], vecs[:, idx]
+        else
+            enrg, st = GetEigensystem(hmt_mat, k)
+        end
+        l2_mat = OpMat(Operator(bs, P.tms_l2)) 
+        c2_mat = OpMat(Operator(bs, P.tms_c2)) 
+        l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
+        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
+        bss[[Sz, R]] = bs
+        for i in eachindex(enrg) 
+            push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i], Sz, R])
         end 
     end 
     sort!(results, by = st -> real(st[1]))

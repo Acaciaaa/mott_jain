@@ -9,7 +9,7 @@ using SpecialFunctions
 using CairoMakie
 using Printf
 
-μc = 0.0994
+μc = 0.0644
 nm1 = 5
 
 function su3()
@@ -17,7 +17,7 @@ function su3()
     #mus, results_vec = PADsu3.read_results(nm1,"critical_point/results_$(nm1).jld2")
     #idx = argmin(abs.(mus .- μc)); val = mus[idx]; results = results_vec[idx]
     P = PADsu3.build_model(nm1=nm1)
-    results = PADsu3.lowest_k_states(P, μc,[0.4,1.2,4.0],0.9,0.2, 7)
+    results = PADsu3.lowest_k_states(P, μc,0.4,1.0,0.3, 7)
     #@printf("%.7f", val)
     #@info results
     E0 = results[1][1]
@@ -34,6 +34,7 @@ function su3()
     #@info [mu;enrg_cal]
     dim_cal = Float64[1, 2, 3, 3, 3]
     factor = (enrg_cal' * dim_cal) / (dim_cal' * dim_cal)
+    @info factor
     
     #P = PADsu3.build_model(nm1=nm1)
     #results_ = PADsu3.lowest_k_states_adjoint(P, μc,0.4,0.9,0.7, 7)

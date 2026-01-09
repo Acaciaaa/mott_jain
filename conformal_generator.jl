@@ -7,26 +7,16 @@ using CairoMakie
 using Printf
 TOL= √(eps(Float64))
 nm1 = 5
-μc = 0.0994
-factor = 0.048789
-nm1 = 5
-μc = 0.1005
-factor = 0.05754
-nm1 = 5
-μc = 0.0859
-factor = 0.092236
-# nm1 = 5
-# μc = 0.0828
-# factor = 0.0878
+μc = 0.0644
+factor = 0.0856
+
 # nm1 = 6
 # μc = 0.0975
 # factor = 0.04573
 
 P = PADsu3.build_model(nm1=nm1)
-#results, bss = PADsu3.for_generator(P, μc,[0.4,1.2,4.0],0.9,0.2, 30)
-#results, bss = PADsu3.for_generator(P, μc,[0.4,1.5,4.0],0.9,0.3, 30)
-results, bss = PADsu3.for_generator(P, μc,0.4,0.9,0.6, 40)
-#results, bss = PADsu3.for_generator(P, μc,0.4,0.9,0.4, 30)
+results, bss = PADsu3.for_generator(P, μc,0.4,1.0,0.3, 100)
+
 function make_lambda_candidates()
     s=P.s
     # --- A. 小费米子算符 ---
@@ -94,9 +84,13 @@ end
 function find_state(l2, c2, rank, name)
     info = wanted_states[(l2, c2)][rank]
     st = info[2]
-    qn = [info[5], info[6], info[7]]
-    bs = bss[qn]
-    return st, bs, info[1]
+    if c2 == 0
+        qn = [info[5], info[6], info[7]]
+        return st, bss[qn], info[1]
+    elseif c2 == 3
+        qn = [info[5], info[6]]
+        return st, bss_J[qn], info[1]
+    end
 end
 function print_coefficients()
     println("\n=== 最终结果 (Final Results) ===")
@@ -157,7 +151,7 @@ end
 
 E0 = results[1][1]
 wanted_states = Dict{Tuple{Int, Int}, Any}()
-for (l2, c2) in [(0,0), (2,0), (6,0), (2,3), (6,3)]
+for (l2, c2) in [(0,0), (2,0), (6,0)]
     wanted_states[(l2, c2)] = filter(st -> abs(st[3]-l2) < TOL && abs(st[4]-c2) < TOL, results)
     # println("(l2, c2) = ($(l2), $(c2))")
     # for s in wanted_states[(l2, c2)]
@@ -184,6 +178,55 @@ st_T, bs_T, _ = find_state(6, 0, 1, "T")
 # ∂∂S (l2=6 c2=0 Rank 2)
 st_ddS, bs_ddS, _ = find_state(6, 0, 2, "∂∂S")
 
+results_J, bss_J = PADsu3.for_generator_J(P, μc,0.4,1.0,0.3, 30)
+for (l2, c2) in [(0,3), (2,3), (6,3)]
+    wanted_states[(l2, c2)] = filter(st -> abs(st[3]-l2) < TOL && abs(st[4]-c2) < TOL, results_J)
+    # println("(l2, c2) = ($(l2), $(c2))")
+    # for s in wanted_states[(l2, c2)]
+    #     println((s[1]-E0)/factor)
+    # end
+
+    # wanted_states[(l2, c2)] = []
+    # candidates_Z1 = []
+    # energies_Z2   = Float64[]
+    # tmps = filter(st -> abs(st[3]-l2) < TOL && abs(st[4]-c2) < TOL, results)
+    # for tmp in tmps
+    #     z_val = tmp[6]
+    #     if abs(z_val + 1.0) < TOL      # Z=-1 Sector
+    #         push!(candidates_Z1, tmp)
+    #     elseif abs(z_val - 1.0) < TOL  # Z=1 Sector
+    #         push!(energies_Z2, tmp[1])   # 我们只关心 Z=1 的能量，不用存向量
+    #     end
+    # end
+    
+    # for tmp in candidates_Z1
+    #     E_curr = tmp[1]
+    #     has_partner = any(e -> abs(e - E_curr) < TOL, energies_Z2)
+    #     if has_partner
+    #         push!(wanted_states[(l2, c2)], tmp)
+    #     end
+    # end
+end
+
+# ∂⋅J' (l2=0 c2=3 Rank 1)
+st_divJprime, bs_divJprime, _ = find_state(0, 3, 1, "∂⋅J'")
+# J (l2=2 c2=3 Rank 1)
+st_J, bs_J, _ = find_state(2, 3, 1, "J")
+# ϵ∂J (l2=2 c2=3 Rank 2) 
+st_curlJ, bs_curlJ, _ = find_state(2, 3, 2, "ϵ∂J")
+# □J (l2=2 c2=3 Rank 3) 
+st_boxJ, bs_boxJ, _ = find_state(2, 3, 3, "□J")
+# J' (l2=2 c2=3 Rank unknown)
+st_Jprime, bs_Jprime, _ = find_state(2, 3, 4, "J'")
+# ϵ∂J' (l2=2 c2=3 Rank unknown) 
+st_curlJprime, bs_curlJprime, _ = find_state(2, 3, 5, "ϵ∂J'")
+# ∂J (l2=6 c2=3 Rank 1)
+st_dJ, bs_dJ, _ = find_state(6, 3, 1, "∂J")
+# ϵ∂∂J (l2=6 c2=3 Rank 2)
+st_epsddJ, bs_epsddJ, _ = find_state(6, 3, 2, "ϵ∂∂J")
+# ∂J' (l2=6 c2=3 Rank unknown)
+st_dJprime, bs_dJprime, _ = find_state(6, 3, 3, "∂J'")
+
 tms_cand = make_lambda_candidates()
 vecs_op = []
 for tms in tms_cand
@@ -201,7 +244,7 @@ for i in 1:n_cand
 end
 coeffs = pinv(M) * b
 
-print_coefficients()
+#print_coefficients()
 
 # ==============================================================================
 # 阶段 4: 复现 Table IV
@@ -224,27 +267,23 @@ end
 
 st_ddS_star,_ = remove_level_mixing()
 
-# 通用计算函数
-function calc_row(label_in, l_target, targets_list, input_tuple, all_results)
+function calc_row(label_in, input_tuple, c2, l_target, targets_list)
     (st_in, bs_in) = input_tuple
     bs_tgt = targets_list[1][2] # Use basis of first target
     op = Operator(bs_in, bs_tgt, tms_Lambdaz)
     v = op * st_in
 
     l_target2 = l_target * (l_target + 1)
-    relevant = filter(r -> abs(r[3]-l_target2)<TOL && abs(r[4])<TOL, all_results)
-    
     denom_sq = 0.0
-    for r in relevant
+    for r in wanted_states[(l_target2, c2)]
         v_eig = r[2]
         denom_sq += abs(dot(v_eig, v))^2
     end
     
-    # 3. 打印
     @printf "| %-8s | %-2d |" label_in l_target
     total_ovlp = 0.0
     
-    for (name_t, bs_t, st_t) in targets_list
+    for (name_t, _, st_t) in targets_list
         val = abs(dot(st_t, v))^2 / denom_sq
         @printf " %-6s %.4f |" name_t val
         total_ovlp += val
@@ -260,28 +299,69 @@ println("| Input    | L' | Target 1 Ovlp | Target 2 Ovlp | Total  |")
 println("|----------|----|---------------|---------------|--------|")
 
 # --- Row 1: S -> ∂S ---
-calc_row("S", 1, 
-    [("∂S", bs_dS, st_dS)], 
-    (st_S, bs_S), results)
+calc_row("S", (st_S, bs_S), 0,
+    1, [("∂S", bs_dS, st_dS)])
 
 # --- Row 2: ∂S -> S, □S ---
-calc_row("∂S", 0, 
-    [("S", bs_S, st_S), ("□S", bs_boxS, st_boxS)], 
-    (st_dS, bs_dS), results)
+calc_row("∂S", (st_dS, bs_dS), 0,
+    0, [("S", bs_S, st_S), ("□S", bs_boxS, st_boxS)])
 
 # --- Row 3: ∂S -> ∂∂S(*) ---
-calc_row("∂S", 2, 
-    [("∂∂S(*)", bs_ddS, st_ddS_star)], 
-    (st_dS, bs_dS), results)
+calc_row("∂S", (st_dS, bs_dS), 0,
+    2, [("∂∂S(*)", bs_ddS, st_ddS_star)])
 
 # --- Row 4: □S -> ∂S, □∂S ---
-calc_row("□S", 1, 
-    [("∂S", bs_dS, st_dS), ("□∂S", bs_boxdS, st_boxdS)], 
-    (st_boxS, bs_boxS), results)
+calc_row("□S", (st_boxS, bs_boxS), 0, 
+    1, [("∂S", bs_dS, st_dS), ("□∂S", bs_boxdS, st_boxdS)])
 
 # --- Row 5: ∂∂S(*) -> ∂S, □∂S ---
-calc_row("∂∂S(*)", 1, 
-    [("∂S", bs_dS, st_dS), ("□∂S", bs_boxdS, st_boxdS)], 
-    (st_ddS_star, bs_ddS), results)
+calc_row("∂∂S(*)", (st_ddS_star, bs_ddS), 0,
+    1, [("∂S", bs_dS, st_dS), ("□∂S", bs_boxdS, st_boxdS)])
 
+println("|----------|----|---------------|---------------|--------|")
+
+# --- Row 6: S' -> ∂S' ---
+calc_row("S'", (st_Sprime, bs_Sprime), 0,
+    1, [("∂S'", bs_dSprime, st_dSprime)])
+
+println("|----------|----|---------------|---------------|--------|")
+    
+# --- Row 7: J -> ϵ∂J ---
+calc_row("J", (st_J, bs_J), 3, 
+        1, [("ϵ∂J", bs_curlJ, st_curlJ)])
+
+# --- Row 8: J -> ∂J ---
+calc_row("J", (st_J, bs_J), 3, 
+        2, [("∂J", bs_dJ, st_dJ)])
+    
+# --- Row 9: ∂J -> J, □J ---
+calc_row("∂J", (st_dJ, bs_dJ), 3,
+        1, [("J", bs_J, st_J), ("□J", bs_boxJ, st_boxJ)])
+    
+# --- Row 10: ∂J -> ϵ∂∂J ---
+calc_row("∂J", (st_dJ, bs_dJ), 3, 
+        2, [("ϵ∂∂J", bs_epsddJ, st_epsddJ)])
+    
+# --- Row 11: ϵ∂J -> J, □J ---
+calc_row("ϵ∂J", (st_curlJ, bs_curlJ), 3,
+        1, [("J", bs_J, st_J), ("□J", bs_boxJ, st_boxJ)])
+    
+# --- Row 12: ϵ∂J -> ϵ∂∂J ---
+calc_row("ϵ∂J", (st_curlJ, bs_curlJ), 3,
+        2, [("ϵ∂∂J", bs_epsddJ, st_epsddJ)])
+
+println("|----------|----|---------------|---------------|--------|")
+
+# --- Row 13: J' -> ∂⋅J' ---
+calc_row("J'", (st_Jprime, bs_Jprime), 3,
+        0, [("∂⋅J'", bs_divJprime, st_divJprime)])
+    
+# --- Row 14: J' -> ϵ∂J' ---
+calc_row("J'", (st_Jprime, bs_Jprime), 3,
+        1, [("ϵ∂J'", bs_curlJprime, st_curlJprime)])
+    
+# --- Row 15: J' -> ∂J' ---
+calc_row("J'", (st_Jprime, bs_Jprime), 3,
+        2, [("∂J'", bs_dJprime, st_dJprime)])
+    
 println("|----------|----|---------------|---------------|--------|")
