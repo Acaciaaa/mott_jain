@@ -31,6 +31,8 @@ Base.@kwdef mutable struct ModelParams
     tms_f123
     tms_V1
     tms_l2
+    tms_lp
+    tms_lm
     tms_c2
     n0
     nf
@@ -97,7 +99,7 @@ function build_model(; nm1::Int)
     tms_c2 = GetC2Terms(nm1, nf1, :SU)
     
     return ModelParams(; name=:PADsu3, nm1, s, nf1, no1, nm0, nf0, no0, no, qnd, qnf, cfs, 
-    tms_hop, tms_int, tms_f123, tms_V1, tms_l2, tms_c2, n0, nf)
+    tms_hop, tms_int, tms_f123, tms_V1, tms_l2, tms_lp, tms_lm, tms_c2, n0, nf)
 end
 
 function make_tms_hmt(
@@ -211,43 +213,42 @@ function for_generator(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Floa
     return results, bss
 end
 
-function for_generator_J(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=10)
+function for_generator_special(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=10)
     results = []
-    bss = Dict{Vector{Int64}, Basis}()
-    for Sz in (0), R in (1, -1) 
-        bs = Basis(Confs(P.no, [P.no1, 0, 2, 0], P.qnd), [R], [P.qnf[2]])
-        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
-        n = hmt_mat.dimd
+    bs = Basis(Confs(P.no, [P.no1, 0, 2, 0], P.qnd))
+    bs_plus = Basis(Confs(P.no, [P.no1, 2, 2, 0], P.qnd))
+    bs_minus = Basis(Confs(P.no, [P.no1, -2, 2, 0], P.qnd))
+    hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
+    n = hmt_mat.dimd
         
-        if n == 0
-            continue
-        elseif n == 1
-            hmatrix = Matrix(hmt_mat)
-            enrg = [hmatrix[1,1]]
-            st   = ones(eltype(hmatrix), 1, 1)
-        elseif n ≤ 128
-            hmatrix = Matrix(hmt_mat)
-            vals, vecs = eigen(hmatrix)
-            k_req =  min(k, n)
-            idx   =  sortperm(vals)[1:k_req]
-            enrg, st = vals[idx], vecs[:, idx]
-        else
-            enrg, st = GetEigensystem(hmt_mat, k)
-        end
-        l2_mat = OpMat(Operator(bs, P.tms_l2)) 
-        c2_mat = OpMat(Operator(bs, P.tms_c2)) 
-        l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
-        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
-        bss[[Sz, R]] = bs
-        for i in eachindex(enrg) 
-            push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i], Sz, R])
-        end 
+    if n == 1
+        hmatrix = Matrix(hmt_mat)
+        enrg = [hmatrix[1,1]]
+        st   = ones(eltype(hmatrix), 1, 1)
+    elseif n ≤ 128
+        hmatrix = Matrix(hmt_mat)
+        vals, vecs = eigen(hmatrix)
+        k_req =  min(k, n)
+        idx   =  sortperm(vals)[1:k_req]
+        enrg, st = vals[idx], vecs[:, idx]
+    else
+        enrg, st = GetEigensystem(hmt_mat, k)
+    end
+    l2_mat = OpMat(Operator(bs, P.tms_l2)) 
+    c2_mat = OpMat(Operator(bs, P.tms_c2)) 
+    l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
+    c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
+    
+    for i in eachindex(enrg) 
+        push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i]])
     end 
+    
     sort!(results, by = st -> real(st[1]))
-    return results, bss
+    return results, bs, bs_plus, bs_minus
 end
 
 using JLD2, Dates
+
 function write_results(P::ModelParams, mus, U0, V1::Float64=1.0, t::Float64=0.8,
                         k::Int=30, path::AbstractString = "data/results_$(P.nm1).jld2")
     mkpath(dirname(path))

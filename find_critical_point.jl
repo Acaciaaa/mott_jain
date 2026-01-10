@@ -130,7 +130,7 @@ function tool_write_results(nm1)
     k = 7
     P = PADsu3.build_model(nm1=nm1)
     #P = PADsu2.build_model(nm1=nm1)
-    mus = collect(range(0.06, 0.07, length=10))
+    mus = collect(range(0.052, 0.058, length=6))
     PADsu3.write_results(P, mus,  0.4,1.0,0.3,k)
     #PADsu2.write_results(P, mus, k)
 end
@@ -139,10 +139,10 @@ end
 
 
 #method_minimize_singlet_gap_distance()
-for i in 3:5
+for i in [6]
     tool_write_results(i)
 end
-for i in 3:5
+for i in [6]
     method_minimize_cost_function_su3(i)
 end
 
