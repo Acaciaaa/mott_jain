@@ -10,9 +10,9 @@ using CairoMakie
 using Printf
 BLAS.set_num_threads(8)
 if_draw = true
-μlower = -0.05#-0.2
+μlower = -0.1#-0.2
 μupper = 0.2#0.2
-μs = collect(range(μlower, μupper, length=25))#40 
+μs = collect(range(μlower, μupper, length=30))#40 
 # for μ in μs
 #     @printf("%.7f\n", μ)
 # end
@@ -38,7 +38,7 @@ for nm1 in 3:5
     #local P = PADsu2.build_model(nm1=nm1)
     Δs = Float64[]
     for μ in μs 
-        local results = PADsu3.lowest_k_states(P, μ,0.4,1.0,0.3,k)
+        local results = PADsu3.lowest_k_states(P, μ,0.6,1.4,0.6,k)
         #local results = PADsu2.lowest_k_states(P, μ, k)
         E0 = results[1][1] 
         # tol = √(eps(Float64)) 

@@ -6,20 +6,58 @@ using SpecialFunctions
 using CairoMakie
 using Printf
 using JLD2, Dates
+using DataFrames, CSV
+using XLSX
 TOL= √(eps(Float64))
-nm1 = 5
-μc = 0.0644
-factor = 0.0856
+# nm1 = 5
+# μc = 0.0644
+# factor = 0.0856
 # nm1 = 6
 # μc = 0.0556
 # factor = 0.075455
+coef = [0.6,1.4,0.6]
+nm1 = 5
+μc = 0.1156
+factor = 0.13149
 
 P = PADsu3.build_model(nm1=nm1)
-data = load("generator/results_bss.jld2")
-results = data["results"]
-bss = data["bss"]
-#results, bss = PADsu3.for_generator(P, μc,0.4,1.0,0.3, 30)
+# data = load("generator/results_bss.jld2")
+# results = data["results"]
+# bss = data["bss"]
+results, bss = PADsu3.for_generator(P, μc, coef[1], coef[2], coef[3], 50)
 
+mutable struct StateInfo
+    label
+    name
+    l2::Int
+    c2::Int
+    rank::Int
+    st
+    bs
+    E
+    st_o
+    E_o
+end
+
+struct StateStore
+    by_label::Dict{Symbol, StateInfo}
+    function StateStore()
+        new(Dict{Symbol, StateInfo}())
+    end
+end
+function add_state!(store::StateStore, label, name, l2, c2, rank, if_othersector)
+    scalar_info = wanted_states[(l2, c2)][rank]
+    qn = [scalar_info[5], scalar_info[6], scalar_info[7]]
+    if if_othersector
+        adjoint_info = wanted_states_othersector[(l2, c2)][rank]
+        state_info = StateInfo(label, name, l2, c2, rank, scalar_info[2], bss[qn], scalar_info[1], 
+                    adjoint_info[2], adjoint_info[1])
+    else
+        state_info = StateInfo(label, name, l2, c2, rank, scalar_info[2], bss[qn], scalar_info[1], 
+                    nothing, nothing)
+    end
+    store.by_label[label] = state_info
+end
 function make_lambda_candidates()
     s=P.s
     # --- A. 小费米子算符 ---
@@ -84,17 +122,6 @@ function make_lambda_candidates()
     end
     return tms_cand
 end
-function find_state(l2, c2, rank, name)
-    info = wanted_states[(l2, c2)][rank]
-    st = info[2]
-    qn = [info[5], info[6], info[7]]
-    return st, bss[qn], info[1]
-end
-function find_state_othersector(l2, c2, rank, name)
-    info = wanted_states_othersector[(l2, c2)][rank]
-    st = info[2]
-    return st, info[1]
-end
 function print_coefficients()
     println("================================")
     # 1. 打印 Overlap 和 Fidelity
@@ -150,48 +177,77 @@ function print_coefficients()
 
     println("================================")
 end
+function print_full_spectrum(filename="/Users/ruiqi/Desktop/spectrum.xlsx")
+    sectors_order = [(0, 0),(2, 0),(6, 0),(0, 3),(2, 3),(6, 3)]
+    lookup_map = Dict{Tuple{Int, Int, Int}, String}()
+    for info in values(db.by_label)
+        lookup_map[(info.l2, info.c2, info.rank)] = info.name
+    end
+
+    max_rows = 0
+    for (l2, c2) in sectors_order
+        if haskey(wanted_states, (l2, c2))
+            max_rows = max(max_rows, length(wanted_states[(l2, c2)]))
+        end
+    end
+
+    df = DataFrame()
+    for (l2, c2) in sectors_order
+        sector_data = wanted_states[(l2, c2)]        
+        col_E = Vector{Union{Float64, Missing}}(missing, max_rows)
+        col_Name = Vector{String}(undef, max_rows)
+        fill!(col_Name, "")
+
+        for r in eachindex(sector_data)
+            col_E[r] = round((sector_data[r][1]-E0)/factor, digits=2)
+            if haskey(lookup_map, (l2, c2, r))
+                col_Name[r] = lookup_map[(l2, c2, r)]
+            else
+                col_Name[r] = ""
+            end
+        end
+
+        df[!, "E_$(l2)_$(c2)"] = col_E
+        df[!, "OP_$(l2)_$(c2)"] = col_Name
+    end
+
+    XLSX.writetable(filename, "Result" => df, overwrite=true)
+end
 
 E0 = results[1][1]
 wanted_states = Dict{Tuple{Int, Int}, Any}()
 wanted_states_othersector = Dict{Tuple{Int, Int}, Any}()
 for (l2, c2) in [(0,0), (2,0), (6,0)]
     wanted_states[(l2, c2)] = filter(st -> abs(st[3]-l2) < TOL && abs(st[4]-c2) < TOL, results)
-    # println("(l2, c2) = ($(l2), $(c2))")
-    # for s in wanted_states[(l2, c2)]
-    #     println((s[1]-E0)/factor)
-    # end
 end
 
+db = StateStore()
 # Ground (l2=0 c2=0 Rank 1)
-st_0, bs_0, E_0 = find_state(0, 0, 1, "0")
-@assert abs(E0-E_0)<TOL "ground state error"
+add_state!(db, :G, "G", 0, 0, 1, false)
 # S (l2=0 c2=0 Rank 2)
-st_S, bs_S, E_S = find_state(0, 0, 2, "S")
+add_state!(db, :S, "S", 0, 0, 2, false)
 # □S (l2=0 c2=0 Rank 3) 
-st_boxS, bs_boxS, E_boxS = find_state(0, 0, 3, "□S")
+add_state!(db, :boxS, "□S", 0, 0, 3, false)
 # S' (l2=0 c2=0 Rank 4) 
-st_Sprime, bs_Sprime, E_Sprime = find_state(0, 0, 4, "S'")
+add_state!(db, :Sprime, "S'", 0, 0, 4, false)
 # ∂S (l2=2 c2=0 Rank 1)
-st_dS, bs_dS, E_dS = find_state(2, 0, 1, "∂S")
+add_state!(db, :dS, "∂S", 2, 0, 1, false)
 # □∂S (l2=2 c2=0 Rank 2)
-st_boxdS, bs_boxdS, E_boxdS = find_state(2, 0, 2, "□∂S")
+add_state!(db, :boxdS, "□∂S", 2, 0, 2, false)
 # ∂S' (l2=2 c2=0 Rank 3)
-st_dSprime, bs_dSprime, E_dSprime = find_state(2, 0, 3, "∂S'")
+add_state!(db, :dSprime, "∂S'", 2, 0, 3, false)
 # T (l2=6 c2=0 Rank 1)
-st_T, bs_T, E_T = find_state(6, 0, 1, "T")
+add_state!(db, :T, "T", 6, 0, 1, false)
 # ∂∂S (l2=6 c2=0 Rank 2)
-st_ddS, bs_ddS, E_ddS = find_state(6, 0, 2, "∂∂S")
+add_state!(db, :ddS, "∂∂S", 6, 0, 2, false)
 
-data = load("generator/results_bss_othersector.jld2")
-results_othersector = data["results"]
-bs0, bsp, bsm = data["bs0"], data["bsp"], data["bsm"]
-#results_J, bs0, bsp, bsm = PADsu3.for_generator_J(P, μc,0.4,1.0,0.3, 50)
+# data = load("generator/results_bss_othersector.jld2")
+# results_othersector = data["results"]
+# bs0, bsp, bsm = data["bs0"], data["bsp"], data["bsm"]
+results_othersector, bs0, bsp, bsm = PADsu3.for_generator_special(
+    P, μc,coef[1], coef[2], coef[3], 200)
 for (l2, c2) in [(0,3), (2,3), (6,3)]
     wanted_states_othersector[(l2, c2)] = filter(st -> abs(st[3]-l2) < TOL && abs(st[4]-c2) < TOL, results_othersector)
-    # println("(l2, c2) = ($(l2), $(c2))")
-    # for s in wanted_states[(l2, c2)]
-    #     println((s[1]-E0)/factor)
-    # end
     wanted_states[(l2, c2)] = []
     candidates_Z1 = []
     energies_Z2   = Float64[]
@@ -215,33 +271,28 @@ for (l2, c2) in [(0,3), (2,3), (6,3)]
 end
 
 # ∂⋅J' (l2=0 c2=3 Rank 1)
-st_divJprime, bs_divJprime, E_divJprime = find_state(0, 3, 1, "∂⋅J'")
+add_state!(db, :divJprime, "∂⋅J'", 0, 3, 1, false)
 # J (l2=2 c2=3 Rank 1)
-st_J, bs_J, E_J = find_state(2, 3, 1, "J")
-st_J_o, E_J_o = find_state_othersector(2, 3, 1, "J")
+add_state!(db, :J, "J", 2, 3, 1, true)
 # ϵ∂J (l2=2 c2=3 Rank 2) 
-st_curlJ, bs_curlJ, E_curlJ = find_state(2, 3, 2, "ϵ∂J")
-st_curlJ_o, E_curlJ_o = find_state_othersector(2, 3, 2, "ϵ∂J")
+add_state!(db, :curlJ, "ϵ∂J", 2, 3, 2, true)
 # □J (l2=2 c2=3 Rank 3) 
-st_boxJ, bs_boxJ, E_boxJ = find_state(2, 3, 4, "□J")
-st_boxJ_o, E_boxJ_o = find_state_othersector(2, 3, 4, "□J")
+add_state!(db, :boxJ, "□J", 2, 3, 4, true)
 # J' (l2=2 c2=3 Rank unknown)
-st_Jprime, bs_Jprime, E_Jprime = find_state(2, 3, 3, "J'")
-st_Jprime_o, E_Jprime_o = find_state_othersector(2, 3, 3, "J'")
+add_state!(db, :Jprime, "J'", 2, 3, 3, true)
 # ϵ∂J' (l2=2 c2=3 Rank unknown) 
-st_curlJprime, bs_curlJprime, E_curlJprime = find_state(2, 3, 6, "ϵ∂J'")
-st_curlJprime_o, E_curlJprime_o = find_state_othersector(2, 3, 6, "ϵ∂J'")
+add_state!(db, :curlJprime, "ϵ∂J'", 2, 3, 6, true)
 # ∂J (l2=6 c2=3 Rank 1)
-st_dJ, bs_dJ, E_dJ = find_state(6, 3, 1, "∂J")
-st_dJ_o, E_dJ_o = find_state_othersector(6, 3, 1, "∂J")
+add_state!(db, :dJ, "∂J", 6, 3, 1, true)
 # ϵ∂∂J (l2=6 c2=3 Rank 2)
-st_epsddJ, bs_epsddJ, E_epsddJ = find_state(6, 3, 3, "ϵ∂∂J")
-st_epsddJ_o, E_epsddJ_o = find_state_othersector(6, 3, 3, "ϵ∂∂J")
+add_state!(db, :epsddJ, "ϵ∂∂J", 6, 3, 3, true)
 # ∂J' (l2=6 c2=3 Rank unknown)
-st_dJprime, bs_dJprime, E_dJprime = find_state(6, 3, 5, "∂J'")
+add_state!(db, :dJprime, "∂J'", 6, 3, 5, false)
 
 tms_cand = make_lambda_candidates()
 vecs_op = []
+bs_S, st_S = db.by_label[:S].bs, db.by_label[:S].st
+bs_dS, st_dS = db.by_label[:dS].bs, db.by_label[:dS].st
 for tms in tms_cand
     op = Operator(bs_S, bs_dS, tms)
     push!(vecs_op, op * st_S)
@@ -264,37 +315,22 @@ coeffs = pinv(M) * b
 # ==============================================================================
 
 tms_Lambdaz = SimplifyTerms(coeffs' * tms_cand)
-function remove_level_mixing()
-    op = Operator(bs_dS, bs_ddS, tms_Lambdaz)
-    v = op * st_dS
+function remove_level_mixing(label_in, target, mix)
+    st_in, bs_in = db.by_label[label_in].st, db.by_label[label_in].bs
+    st_1, bs_1 = db.by_label[target].st, db.by_label[target].bs
+    st_2, bs_2 = db.by_label[mix].st, db.by_label[mix].bs
+    op = Operator(bs_in, bs_1, tms_Lambdaz)
+    v = op * st_in
 
-    c1 = dot(st_T, v)
-    c2 = dot(st_ddS, v)
+    c1 = dot(st_1, v)
+    c2 = dot(st_2, v)
 
-    st_ddS_star = c1 .* st_T .+ c2 .* st_ddS
-    normalize!(st_ddS_star)
-    st_T_star = c2 .* st_T .- c1 .* st_ddS
-    normalize!(st_T_star)
-    return st_ddS_star, st_T_star
+    st_target_star = c1 .* st_1 .+ c2 .* st_2
+    normalize!(st_target_star)
+    st_mix_star = c2 .* st_1 .- c1 .* st_2
+    normalize!(st_mix_star)
+    return st_target_star, st_mix_star
 end
-
-st_ddS_star,_ = remove_level_mixing()
-
-"""
-project_L_state(st, op_l2, target_l, all_ls)
-
-功能: 从混合态 st 中分离出具有特定角动量 target_l 的纯态。
-原理: 构造投影算符 P = Π (L^2 - λ_bad) / (λ_target - λ_bad)，依次剔除不需要的分量。
-
-参数:
-- st:       输入的混合态矢量 (Vector)
-- op_l2:    L^2 算符矩阵 (OpMat 或 Matrix)
-- target_l: 你想要的那个角动量量子数 (Int, 如 1)
-- all_ls:   该态中混入的所有角动量量子数列表 (Vector{Int}, 如 [1, 2, 3])
-
-返回:
-- 投影后的纯态矢量
-"""
 function project_state(st, op_l2, l_target, all_ls)
     st_out = copy(st)
     l2_target = l_target * (l_target + 1)
@@ -315,33 +351,35 @@ function get_possible_ls(l_input::Int)
     end
     return [l_input - 1, l_input, l_input + 1]
 end
-function calc_row(label_in, l_input, input_tuple, l_target, targets_list)
-    (st_in, bs_in) = input_tuple
-    bs_tgt = targets_list[1][2] # Use basis of first target
+function calc_row(label_in, l_input, l_target, targets_list)
+    info_in = db.by_label[label_in]
+    st_in, bs_in, E_in = info_in.st, info_in.bs, info_in.E
+    bs_tgt = db.by_label[targets_list[1]].bs # Use basis of first target
     op = Operator(bs_in, bs_tgt, tms_Lambdaz)
     v = op * st_in
     v_proj = project_state(v, Operator(bs_tgt, bs_tgt, P.tms_l2), l_target, get_possible_ls(l_input))
     denom_sq = Real(dot(v_proj, v_proj))
     @assert denom_sq>0.1 "denom_sq invalid"
     #println("denom_sq:$denom_sq")
-    
-    @printf "| %-8s | %-2d |" label_in l_target
+    @printf "| %-6s | %-2d |" info_in.name l_target
     total_ovlp = 0.0
     
-    for (name_t, _, st_t) in targets_list
-        #println("tmp:$(abs(dot(st_t, v))^2)")
-        val = abs(dot(st_t, v))^2 / denom_sq
-        @printf " %-6s %.4f |" name_t val
+    for label_out in targets_list
+        info_out = db.by_label[label_out]
+        st_out, name_out, E_out = info_out.st, info_out.name, info_out.E
+        val = abs(dot(st_out, v))^2 / denom_sq
+        @printf " %-12s %.4f |" @sprintf("%s(%.2f)", name_out, (E_out-E_in)/factor) val
         total_ovlp += val
     end
     
     if length(targets_list) < 2
-        print("        -      |")
+        print("          -          |")
     end
     @printf " %.4f |\n" total_ovlp
 end
-
-function calc_row_sameang(label_in, l_input, st_in, l_target, targets_list)
+function calc_row_sameang(label_in, l_input, l_target, targets_list)
+    info_in = db.by_label[label_in]
+    st_in, E_in = info_in.st_o, info_in.E_o
     op_Lm = Operator(bs0, bsm, P.tms_lm)
     op = Operator(bsm, bsm, tms_Lambdaz)
     op_Lp = Operator(bsm, bs0, P.tms_lp)
@@ -353,111 +391,97 @@ function calc_row_sameang(label_in, l_input, st_in, l_target, targets_list)
     @assert denom_sq>0.1 "denom_sq invalid"
     #println("denom_sq:$denom_sq")
     
-    @printf "| %-8s | %-2d |" label_in l_target
+    @printf "| %-6s | %-2d |" info_in.name l_target
     total_ovlp = 0.0
     
-    for (name_t, st_t) in targets_list
-        #println("tmp:$(abs(dot(st_t, v))^2)")
-        val = abs(dot(st_t, v))^2 / denom_sq
-        @printf " %-6s %.4f |" name_t val
+    for label_out in targets_list
+        info_out = db.by_label[label_out]
+        st_out, name_out, E_out = info_out.st_o, info_out.name, info_out.E_o
+        val = abs(dot(st_out, v))^2 / denom_sq
+        @printf " %-12s %.4f |" @sprintf("%s(%.2f)", name_out, (E_out-E_in)/factor) val
         total_ovlp += val
     end
     
     if length(targets_list) < 2
-        print("        -      |")
+        print("          -          |")
     end
     @printf " %.4f |\n" total_ovlp
 end
+db.by_label[:ddS].st, db.by_label[:T].st = remove_level_mixing(:dS, :ddS, :T)
 
-println("| Input    | l' | Target 1 Ovlp | Target 2 Ovlp | Total  |")
-println("|----------|----|---------------|---------------|--------|")
+println("| Input  | l' | Target 1 Ovlp       | Target 2 Ovlp       | Total  |")
+println("|--------|----|---------------------|---------------------|--------|")
 
 # --- Row 1: S -> ∂S ---
-calc_row("S", 0, (st_S, bs_S),
-    1, [("∂S", bs_dS, st_dS)])
+calc_row(:S, 0, 1, [:dS])
 
 # --- Row 2: ∂S -> S, □S ---
-calc_row("∂S", 1, (st_dS, bs_dS),
-    0, [("S", bs_S, st_S), ("□S", bs_boxS, st_boxS)])
+calc_row(:dS, 1, 0, [:S, :boxS])
 
 # --- Row 3: ∂S -> ∂∂S(*) ---
-calc_row("∂S", 1, (st_dS, bs_dS),
-    2, [("∂∂S(*)", bs_ddS, st_ddS_star)])
+calc_row(:dS, 1, 2, [:ddS])
 
 # --- Row 4: □S -> ∂S, □∂S ---
-calc_row("□S", 0, (st_boxS, bs_boxS),
-    1, [("∂S", bs_dS, st_dS), ("□∂S", bs_boxdS, st_boxdS)])
+calc_row(:boxS, 0, 1, [:dS, :boxdS])
 
 # --- Row 5: ∂∂S(*) -> ∂S, □∂S ---
-calc_row("∂∂S(*)", 2, (st_ddS_star, bs_ddS),
-    1, [("∂S", bs_dS, st_dS), ("□∂S", bs_boxdS, st_boxdS)])
+calc_row(:ddS, 2, 1, [:dS, :boxdS])
 
-println("|----------|----|---------------|---------------|--------|")
+println("|--------|----|---------------------|---------------------|--------|")
 
 # --- Row 6: S' -> ∂S' ---
-calc_row("S'", 0, (st_Sprime, bs_Sprime),
-    1, [("∂S'", bs_dSprime, st_dSprime)])
+calc_row(:Sprime, 0, 1, [:dSprime])
 
-println("|----------|----|---------------|---------------|--------|")
+println("|--------|----|---------------------|---------------------|--------|")
     
 # --- Row 7: J -> ϵ∂J (same ang!) ---
-calc_row_sameang("J", 1, st_J_o,
-        1, [("ϵ∂J", st_curlJ_o)])
+calc_row_sameang(:J, 1, 1, [:curlJ])
 
 # --- Row 8: J -> ∂J ---
-calc_row("J", 1, (st_J, bs_J),
-        2, [("∂J", bs_dJ, st_dJ)])
+calc_row(:J, 1, 2, [:dJ])
     
 # --- Row 9: ∂J -> J, □J ---
-calc_row("∂J", 2, (st_dJ, bs_dJ),
-        1, [("J", bs_J, st_J), ("□J", bs_boxJ, st_boxJ)])
+calc_row(:dJ, 2, 1, [:J, :boxJ])
     
 # --- Row 10: ∂J -> ϵ∂∂J (same ang!) ---
-calc_row_sameang("∂J", 2, st_dJ_o,
-        2, [("ϵ∂∂J", st_epsddJ_o)])
+calc_row_sameang(:dJ, 2, 2, [:epsddJ])
     
 # --- Row 11: ϵ∂J -> J, □J (same ang!) ---
-calc_row_sameang("ϵ∂J", 1, st_curlJ_o,
-        1, [("J", st_J_o), ("□J", st_boxJ_o)])
+calc_row_sameang(:curlJ, 1, 1, [:J, :boxJ])
     
 # --- Row 12: ϵ∂J -> ϵ∂∂J ---
-calc_row("ϵ∂J", 1, (st_curlJ, bs_curlJ),
-        2, [("ϵ∂∂J", bs_epsddJ, st_epsddJ)])
+calc_row(:curlJ, 1, 2, [:epsddJ])
 
-println("|----------|----|---------------|---------------|--------|")
+println("|--------|----|---------------------|---------------------|--------|")
 
 # --- Row 13: J' -> ∂⋅J' ---
-calc_row("J'", 1, (st_Jprime, bs_Jprime),
-        0, [("∂⋅J'", bs_divJprime, st_divJprime)])
+calc_row(:Jprime, 1, 0, [:divJprime])
     
 # --- Row 14: J' -> ϵ∂J' (same ang!) ---
-calc_row_sameang("J'", 1, st_Jprime_o,
-        1, [("ϵ∂J'", st_curlJprime_o)])
+calc_row_sameang(:Jprime, 1, 1, [:curlJprime])
     
 # --- Row 15: J' -> ∂J' ---
-calc_row("J'", 1, (st_Jprime, bs_Jprime),
-        2, [("∂J'", bs_dJprime, st_dJprime)])
+calc_row(:Jprime, 1, 2, [:dJprime])
     
-println("|----------|----|---------------|---------------|--------|")
+println("|--------|----|---------------------|---------------------|--------|")
 
 function check_current_conservation()
-    # op = Operator(bs0, bs0, tms_Lambdaz)
-    # v = op * st_J_o
-    # v_proj = project_state(v, Operator(bs0, bs0, P.tms_l2), 0, get_possible_ls(1))
+    bs_J, st_J = db.by_label[:J].bs, db.by_label[:J].st
+    bs_dJ = db.by_label[:dJ].bs
     op = Operator(bs_J, bs_dJ, tms_Lambdaz)
     v = op * st_J
     v_proj = project_state(v, Operator(bs_dJ, bs_dJ, P.tms_l2), 0, get_possible_ls(1))
-    @info Real(dot(v_proj, v_proj))/Real(dot(v, v))
+    println("current conservation: $(Real(dot(v_proj, v_proj))/Real(dot(v, v)))")
 end
 function check_tensor_conservation()
-    _ ,st_T_star = remove_level_mixing()
-    info_T = wanted_states[(6, 0)][1]
-    bs_T = bss[[info_T[5], info_T[6], info_T[7]]]
-    bs_after = bss[[info_T[5], info_T[6], -info_T[7]]]
+    raw_info_T = wanted_states[(6, 0)][1]
+    bs_after = bss[[raw_info_T[5], raw_info_T[6], -raw_info_T[7]]]
+    bs_T, st_T = db.by_label[:T].bs, db.by_label[:T].st
     op = Operator(bs_T, bs_after, tms_Lambdaz)
-    v = op * st_T_star
+    v = op * st_T
     v_proj = project_state(v, Operator(bs_after, bs_after, P.tms_l2), 1, get_possible_ls(2))
-    @info Real(dot(v_proj, v_proj))/Real(dot(v, v))
+    println("tensor conservation: $(Real(dot(v_proj, v_proj))/Real(dot(v, v)))")
 end
 check_current_conservation()
 check_tensor_conservation()
+print_full_spectrum()
