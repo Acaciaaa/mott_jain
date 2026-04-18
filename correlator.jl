@@ -8,16 +8,20 @@ using Printf
 using JLD2, Dates
 using LegendrePolynomials
 TOL= √(eps(Float64))
-coef = [0.6,1.4,0.6]
-nm1 = 5
-μc = 0.1156
-factor = 0.13149
+file_path = "../a"
+coef = [0.4,0.9,0.3]
+#nm1 = 6
+#μc=0.0737
+#factor = 0.0757
+nm1 = 7
+μc=0.0697
+factor = 0.0692
 
 P = PADsu3.build_model(nm1=nm1)
-# data = load("generator/results_bss.jld2")
-# results = data["results"]
-# bss = data["bss"]
-results, bss = PADsu3.for_generator(P, μc, coef[1], coef[2], coef[3],7)
+data = load(joinpath(file_path, "generator_$(nm1).jld2"))
+results = data["results"]
+bss = data["bss"]
+#results, bss = PADsu3.for_generator(P, μc, coef[1], coef[2], coef[3],7)
 tmp = filter(st -> abs(st[3]) < TOL && abs(st[4]) < TOL, results)
 st_0, bs_0, E_0 = tmp[1][2], bss[[tmp[1][5],tmp[1][6],tmp[1][7]]], tmp[1][1]
 st_S, bs_S, E_S = tmp[2][2], bss[[tmp[2][5],tmp[2][6],tmp[2][7]]], tmp[2][1]

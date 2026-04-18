@@ -63,7 +63,7 @@ function method_minimize_cost_function_su3(nm1)
             filter(st -> st[2] ≈ 2 && st[3] ≈ 3, results)[1][1] - E0, # J
             filter(st -> st[2] ≈ 2 && st[3] ≈ 3, results)[3][1] - E0, # ϵ∂J
             filter(st -> st[2] ≈ 6 && st[3] ≈ 3, results)[1][1] - E0, # ∂J
-            filter(st -> st[2] ≈ 6 && st[3] ≈ 0, results)[1][1] - E0 # T
+            filter(st -> st[2] ≈ 6 && st[3] ≈ 0, results)[2][1] - E0 # T
         ]
         #@info [mu;enrg_cal]
         dim_cal = Float64[1, 2, 3, 3, 3]
@@ -84,8 +84,7 @@ function method_minimize_cost_function_su3(nm1)
         position = (μc, Qs[i_min]),
         align = (:left, :bottom),)
     #display(fig)
-    @info μc
-    @info Qs[i_min]
+    @printf "μc:%.4f Q:%.4f factor:%.4f\n" μc Qs[i_min] factors[i_min]
     return μc,Qs[i_min]
 end
 
@@ -127,11 +126,11 @@ function method_minimize_cost_function_su2(nm1)
 end
 
 function tool_write_results(nm1)
-    k = 7
+    k = 10
     P = PADsu3.build_model(nm1=nm1)
     #P = PADsu2.build_model(nm1=nm1)
-    mus = collect(range(0.11, 0.12, length=10))
-    PADsu3.write_results(P, mus,  0.6,1.4,0.6,k)
+    mus = collect(range(0.1, 0.15, length=10))
+    PADsu3.write_results(P, mus,  [0.509, 1.9, 4.581],[0.0, 0.5, 0.8],0.5,k)
     #PADsu2.write_results(P, mus, k)
 end
 

@@ -10,9 +10,9 @@ using CairoMakie
 using Printf
 BLAS.set_num_threads(8)
 if_draw = true
-μlower = -0.1#-0.2
-μupper = 0.2#0.2
-μs = collect(range(μlower, μupper, length=30))#40 
+μlower = 0.05#-0.2
+μupper = 0.15#0.2
+μs = collect(range(μlower, μupper, length=20))#40 
 # for μ in μs
 #     @printf("%.7f\n", μ)
 # end
@@ -26,7 +26,7 @@ if if_draw
         title = "Singlet gap vs μ", 
         aspect = 1,
         ) 
-    ylims!(ax, 0.0, 0.8)
+    ylims!(ax, 0.0, 1.0)
     ax.xminorticks = IntervalsBetween(10)
     ax.xminorgridvisible = true
 end
@@ -38,20 +38,8 @@ for nm1 in 3:5
     #local P = PADsu2.build_model(nm1=nm1)
     Δs = Float64[]
     for μ in μs 
-        local results = PADsu3.lowest_k_states(P, μ,0.6,1.4,0.6,k)
-        #local results = PADsu2.lowest_k_states(P, μ, k)
+        local results = PADsu3.lowest_k_states(P, μ, [0.509, 1.835, 4.581],[0.2, 0.411, 1.023],0.5,k)
         E0 = results[1][1] 
-        # tol = √(eps(Float64)) 
-        # idx_singlet = nothing 
-        # for j in 2:lastindex(results) 
-        #     r = results[j]
-        #     if abs(r[2]) < tol && abs(r[3]) < tol 
-        #         idx_singlet = j 
-        #         break
-        #     end
-        # end 
-        # ΔE = isnothing(idx_singlet) ? -1.0 : (results[idx_singlet][1] - E0) 
-        #ΔE = results[2][1] - E0
         matches = filter(st -> st[2] ≈ 0 && st[3] ≈ 0, results)
         ΔE = (length(matches) ≥ 2 ? matches[2][1] : matches[1][1]) - E0
         # @printf("%.7f\n", μ)

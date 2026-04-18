@@ -9,22 +9,25 @@ using JLD2, Dates
 using DataFrames, CSV
 using XLSX
 TOL= √(eps(Float64))
-# nm1 = 5
-# μc = 0.0644
-# factor = 0.0856
+# coef = [0.4,0.9,0.8]
+# file_path = "../c"
 # nm1 = 6
-# μc = 0.0556
-# factor = 0.075455
-coef = [0.6,1.4,0.6]
+# factor = 0.088
+# coef = [0.4,0.9,0.3]
+# file_path = "../a"
+# nm1 = 7
+# factor = 0.0692
+file_path = "/Users/ruiqi/Desktop"
+coef = [[0.5, 1.771, 4.5],[0.0, 0.395, 1.0],0.5]
 nm1 = 5
-μc = 0.1156
-factor = 0.13149
+μc=0.064
+factor = 0.042
 
 P = PADsu3.build_model(nm1=nm1)
-# data = load("generator/results_bss.jld2")
+# data = load(joinpath(file_path, "generator_$(nm1).jld2"))
 # results = data["results"]
 # bss = data["bss"]
-results, bss = PADsu3.for_generator(P, μc, coef[1], coef[2], coef[3], 50)
+results, bss = PADsu3.for_generator(P, μc, coef[1], coef[2], coef[3], 200)
 
 mutable struct StateInfo
     label
@@ -67,20 +70,23 @@ function make_lambda_candidates()
     c0 = PadAngModes(GetElectronMod(P.nm0, P.nf0, 1), P.no1)
 
     # --- A. f-f 配对 ---
-    Delta_ff = Dict()
+    Delta_ff_Uf = Dict()
+    Delta_ff_Vf = Dict()
     for i in 1:3, j in 1:3
         if i < j
-            Delta_ff[(i,j)] = FilterL2(cf[i] * cf[j], 2 * s) 
+            Delta_ff_Uf[(i,j)] = FilterL2(cf[i] * cf[j], 2 * s) 
+            Delta_ff_Vf[(i,j)] = FilterL2(cf[i] * cf[j], 2 * s - 2)
         end
     end
 
     # --- B. f0-f0 配对 ---
     pair_00 = c0 * c0
     Delta_0_U0 = FilterL2(pair_00, 6 * s - 1)
-    Delta_0_V1 = FilterL2(pair_00, 6 * s - 3)
+    Delta_0_V0 = FilterL2(pair_00, 6 * s - 3)
 
     # --- C. f0-f 混合配对 ---
-    Delta_0f = [FilterL2(c0 * cf[i], 4 * s) for i in 1:3]
+    Delta_0f_Uf0 = [FilterL2(c0 * cf[i], 4 * s) for i in 1:3]
+    Delta_0f_Vf0 = [FilterL2(c0 * cf[i], 4 * s - 2) for i in 1:3]
 
     # --- D. 三体算符 Trion ---
     pair_12_2s = FilterL2(cf[1] * cf[2], 2 * s)
@@ -93,29 +99,41 @@ function make_lambda_candidates()
 
     # 1. U_f 项
     for i in 1:3, j in (i+1):3
-        term = Delta_ff[(i,j)]' * Delta_ff[(i,j)]
+        term = Delta_ff_Uf[(i,j)]' * Delta_ff_Uf[(i,j)]
         push!(tms_cand, GetComponent(FilterL2(term, 1), 1, 0))
     end
 
-    # 2. U_0 项
+    # 2. V_f 项
+    for i in 1:3, j in (i+1):3
+        term = Delta_ff_Vf[(i,j)]' * Delta_ff_Vf[(i,j)]
+        push!(tms_cand, GetComponent(FilterL2(term, 1), 1, 0))
+    end
+
+    # 3. U_0 项
     term_U0 = Delta_0_U0' * Delta_0_U0
     push!(tms_cand, GetComponent(FilterL2(term_U0, 1), 1, 0))
 
-    # 3. V_1 项
-    term_V1 = Delta_0_V1' * Delta_0_V1
-    push!(tms_cand, GetComponent(FilterL2(term_V1, 1), 1, 0))
+    # 4. V_0 项
+    term_V0 = Delta_0_V0' * Delta_0_V0
+    push!(tms_cand, GetComponent(FilterL2(term_V0, 1), 1, 0))
 
-    # 4. U_0f 项
+    # 5. U_f0 项
     for i in 1:3
-        term = Delta_0f[i]' * Delta_0f[i]
+        term = Delta_0f_Uf0[i]' * Delta_0f_Uf0[i]
         push!(tms_cand, GetComponent(FilterL2(term, 1), 1, 0))
     end
 
-    # 5. 隧穿项 t
+    # 6. V_f0 项
+    for i in 1:3
+        term = Delta_0f_Vf0[i]' * Delta_0f_Vf0[i]
+        push!(tms_cand, GetComponent(FilterL2(term, 1), 1, 0))
+    end
+
+    # 7. 隧穿项 t
     term_t = c0' * Trion + Trion' * c0
     push!(tms_cand, GetComponent(FilterL2(term_t, 1), 1, 0))
 
-    # 6. 化学势项 mu
+    # 8. 化学势项 mu
     for i in 1:3
         term_mu = cf[i]' * cf[i]
         push!(tms_cand, GetComponent(FilterL2(term_mu, 1), 1, 0))
@@ -139,37 +157,46 @@ function print_coefficients()
     @printf "Overlap = %.6f\n" fidelity
     println("--------------------------------")
 
-    idx = 1 # 计数器
+    idx = 1
 
-    println("--- 1. U_f ---")
+    println("--- 1. U_f (s-wave) ---")
     # 对应循环: for i in 1:3, j in (i+1):3
     for i in 1:3, j in (i+1):3
         @printf "  U_f (%d,%d) : %10.6f\n" i j abs(coeffs[idx])
         global idx += 1
     end
 
-    println("--- 2. U_0 ---")
+    println("--- 2. V_f (d-wave, 新增) ---")
+    for i in 1:3, j in (i+1):3
+        @printf "  V_f (%d,%d) : %10.6f\n" i j abs(coeffs[idx])
+        global idx += 1
+    end
+
+    println("--- 3. U_0 (p-wave) ---")
     @printf "  U_0        : %10.6f\n" abs(coeffs[idx])
     global idx += 1
 
-    println("--- 3. V_1 ---")
-    # === 这里是你最关心的 ===
-    @printf "  V_1        : %10.6f\n" abs(coeffs[idx])
+    println("--- 4. V_0 (f-wave, 原 V_1) ---")
+    @printf "  V_0        : %10.6f\n" abs(coeffs[idx])
     global idx += 1
 
-    println("--- 4. U_0f ---")
-    # 对应循环: for i in 1:3
+    println("--- 5. U_0f (s-wave) ---")
     for i in 1:3
         @printf "  U_0f (%d)   : %10.6f\n" i abs(coeffs[idx])
         global idx += 1
     end
 
-    println("--- 5. t ---")
+    println("--- 6. V_f0 (d-wave, 新增) ---")
+    for i in 1:3
+        @printf "  V_f0 (%d)   : %10.6f\n" i abs(coeffs[idx])
+        global idx += 1
+    end
+
+    println("--- 7. t (Tunneling) ---")
     @printf "  t          : %10.6f\n" abs(coeffs[idx])
     global idx += 1
 
-    println("--- 6. mu ---")
-    # 对应循环: for i in 1:3
+    println("--- 8. mu (Chemical Potential) ---")
     for i in 1:3
         @printf "  mu (%d)     : %10.6f\n" i abs(coeffs[idx])
         global idx += 1
@@ -177,7 +204,7 @@ function print_coefficients()
 
     println("================================")
 end
-function print_full_spectrum(filename="/Users/ruiqi/Desktop/spectrum.xlsx")
+function print_full_spectrum(filename=joinpath(file_path, "spectrum_$(nm1).xlsx"))
     sectors_order = [(0, 0),(2, 0),(6, 0),(0, 3),(2, 3),(6, 3)]
     lookup_map = Dict{Tuple{Int, Int, Int}, String}()
     for info in values(db.by_label)
@@ -186,14 +213,16 @@ function print_full_spectrum(filename="/Users/ruiqi/Desktop/spectrum.xlsx")
 
     max_rows = 0
     for (l2, c2) in sectors_order
-        if haskey(wanted_states, (l2, c2))
-            max_rows = max(max_rows, length(wanted_states[(l2, c2)]))
-        end
+    # 使用 get 函数，如果没有这个 key，就返回空数组 []
+    # 这样 length([]) 就是 0，不会报错
+        len1 = length(get(wanted_states, (l2, c2), []))
+        len2 = length(get(wanted_states_othersector, (l2, c2), []))
+        max_rows = max(max_rows, len1, len2)
     end
 
     df = DataFrame()
     for (l2, c2) in sectors_order
-        sector_data = wanted_states[(l2, c2)]        
+        sector_data = wanted_states[(l2, c2)]
         col_E = Vector{Union{Float64, Missing}}(missing, max_rows)
         col_Name = Vector{String}(undef, max_rows)
         fill!(col_Name, "")
@@ -213,6 +242,61 @@ function print_full_spectrum(filename="/Users/ruiqi/Desktop/spectrum.xlsx")
 
     XLSX.writetable(filename, "Result" => df, overwrite=true)
 end
+function test_capacity(filename=joinpath(file_path, "capacity_$(nm1).xlsx"))
+    sectors_order = [(0, 0),(2, 0),(6, 0),(0, 3),(2, 3),(6, 3)]
+    othersectors_order = [(0, 3),(2, 3),(6, 3)]
+    max_rows = 0
+    for (l2, c2) in sectors_order
+        len1 = length(get(wanted_states, (l2, c2), []))
+        len2 = length(get(wanted_states_othersector, (l2, c2), []))
+        max_rows = max(max_rows, len1, len2)
+    end
+
+    df = DataFrame()
+    for (l2, c2) in sectors_order
+        sector_data = wanted_states[(l2, c2)]        
+        col_E = Vector{Union{Float64, Missing}}(missing, max_rows)
+        for r in eachindex(sector_data)
+            col_E[r] = round((sector_data[r][1]-E0)/factor, digits=2)
+        end
+        df[!, "E_$(l2)_$(c2)"] = col_E
+    end
+    for (l2, c2) in othersectors_order
+        sector_data = wanted_states_othersector[(l2, c2)]        
+        col_E = Vector{Union{Float64, Missing}}(missing, max_rows)
+        for r in eachindex(sector_data)
+            col_E[r] = round((sector_data[r][1]-E0)/factor, digits=2)
+        end
+
+        df[!, "Eo_$(l2)_$(c2)"] = col_E
+    end
+
+    XLSX.writetable(filename, "Result" => df, overwrite=true)
+end
+function test_adjoint_scalar(l0=1)
+    T3 = zeros(ComplexF64, 3, 3)
+    T3[1,1] =  0.5
+    T3[2,2] = -0.5
+    J3  = GetDensityObs(P.nm1, 3, T3)
+    J3l = FilterComponent(J3, (l,m) -> l == l0)
+    JJ  = J3l * J3l 
+    
+    # T8 = zeros(ComplexF64, 3, 3)
+    # T8[1,1] =  1/(2*sqrt(3))
+    # T8[2,2] =  1/(2*sqrt(3))
+    # T8[3,3] = -1/sqrt(3)
+    # J8  = GetDensityObs(P.nm1, 3, T8)
+    # J8l = FilterComponent(J8, (l,m) -> l == l0)
+    # JJ  = J8l * J8l
+
+    terms = GetComponent(JJ, 0, 0)             
+    bs_G, st_G = db.by_label[:G].bs, db.by_label[:G].st
+    bs_O, st_O = db.by_label[:O].bs, db.by_label[:O].st
+    op = Operator(bs_G, bs_O, terms)
+    amp = st_O' * op * st_G           
+    og  = op * st_G                  
+    return abs(amp) / (sqrt(real(og' * og)) + 1e-300)
+end
 
 E0 = results[1][1]
 wanted_states = Dict{Tuple{Int, Int}, Any}()
@@ -222,30 +306,23 @@ for (l2, c2) in [(0,0), (2,0), (6,0)]
 end
 
 db = StateStore()
-# Ground (l2=0 c2=0 Rank 1)
 add_state!(db, :G, "G", 0, 0, 1, false)
-# S (l2=0 c2=0 Rank 2)
-add_state!(db, :S, "S", 0, 0, 2, false)
-# □S (l2=0 c2=0 Rank 3) 
-add_state!(db, :boxS, "□S", 0, 0, 3, false)
-# S' (l2=0 c2=0 Rank 4) 
 add_state!(db, :Sprime, "S'", 0, 0, 4, false)
-# ∂S (l2=2 c2=0 Rank 1)
+add_state!(db, :dSprime, "∂S'", 2, 0, 3, false) #ab是3; c是5
+#add_state!(db, :dSprime_mix, "∂S'_mix", 2, 0, 5, false)
+
+add_state!(db, :S, "S", 0, 0, 2, false)
+add_state!(db, :boxS, "□S", 0, 0, 3, false)
 add_state!(db, :dS, "∂S", 2, 0, 1, false)
-# □∂S (l2=2 c2=0 Rank 2)
 add_state!(db, :boxdS, "□∂S", 2, 0, 2, false)
-# ∂S' (l2=2 c2=0 Rank 3)
-add_state!(db, :dSprime, "∂S'", 2, 0, 3, false)
-# T (l2=6 c2=0 Rank 1)
-add_state!(db, :T, "T", 6, 0, 1, false)
-# ∂∂S (l2=6 c2=0 Rank 2)
 add_state!(db, :ddS, "∂∂S", 6, 0, 2, false)
 
-# data = load("generator/results_bss_othersector.jld2")
+add_state!(db, :T, "T", 6, 0, 1, false)
+
+# data = load(joinpath(file_path, "generator_othersector_$(nm1).jld2"))
 # results_othersector = data["results"]
 # bs0, bsp, bsm = data["bs0"], data["bsp"], data["bsm"]
-results_othersector, bs0, bsp, bsm = PADsu3.for_generator_special(
-    P, μc,coef[1], coef[2], coef[3], 200)
+results_othersector, bs0, bsp, bsm = PADsu3.for_generator_special(P, μc,coef[1], coef[2], coef[3], 400)
 for (l2, c2) in [(0,3), (2,3), (6,3)]
     wanted_states_othersector[(l2, c2)] = filter(st -> abs(st[3]-l2) < TOL && abs(st[4]-c2) < TOL, results_othersector)
     wanted_states[(l2, c2)] = []
@@ -254,10 +331,10 @@ for (l2, c2) in [(0,3), (2,3), (6,3)]
     tmps = filter(st -> abs(st[3]-l2) < TOL && abs(st[4]-c2) < TOL, results)
     for tmp in tmps
         z_val = tmp[6]
-        if abs(z_val + 1.0) < TOL      # Z=-1 Sector
+        if abs(z_val - 1.0) < TOL      # Z=+1 Sector
             push!(candidates_Z1, tmp)
-        elseif abs(z_val - 1.0) < TOL  # Z=1 Sector
-            push!(energies_Z2, tmp[1])   # 我们只关心 Z=1 的能量，不用存向量
+        elseif abs(z_val + 1.0) < TOL  # Z=-1 Sector
+            push!(energies_Z2, tmp[1])   # 我们只关心 Z=-1 的能量，不用存向量
         end
     end
     
@@ -270,66 +347,80 @@ for (l2, c2) in [(0,3), (2,3), (6,3)]
     end
 end
 
-# ∂⋅J' (l2=0 c2=3 Rank 1)
-add_state!(db, :divJprime, "∂⋅J'", 0, 3, 1, false)
-# J (l2=2 c2=3 Rank 1)
+add_state!(db, :O, "O", 0, 3, 1, false)
+add_state!(db, :boxO, "□O", 0, 3, 2, false)
+add_state!(db, :dO, "∂O", 2, 3, 5, false)
+add_state!(db, :ddO, "∂∂O", 6, 3, 13, false) #找不着 这是暂时最好的了;
+
+add_state!(db, :divJprime, "∂⋅J'", 0, 3, 3, false)
+add_state!(db, :Jprime, "J'", 2, 3, 6, true) #ab是6; c是4
+add_state!(db, :curlJprime, "ϵ∂J'", 2, 3, 10, true) #a是10; b是11; c找不着
+add_state!(db, :dJprime, "∂J'", 6, 3, 12, false) #a是12; b是14且有14 15mixing; c找不着
+
 add_state!(db, :J, "J", 2, 3, 1, true)
-# ϵ∂J (l2=2 c2=3 Rank 2) 
 add_state!(db, :curlJ, "ϵ∂J", 2, 3, 2, true)
-# □J (l2=2 c2=3 Rank 3) 
-add_state!(db, :boxJ, "□J", 2, 3, 4, true)
-# J' (l2=2 c2=3 Rank unknown)
-add_state!(db, :Jprime, "J'", 2, 3, 3, true)
-# ϵ∂J' (l2=2 c2=3 Rank unknown) 
-add_state!(db, :curlJprime, "ϵ∂J'", 2, 3, 6, true)
-# ∂J (l2=6 c2=3 Rank 1)
+add_state!(db, :boxJ, "□J", 2, 3, 3, true) #有3 4mixing但是不知道怎么处理; b一样
 add_state!(db, :dJ, "∂J", 6, 3, 1, true)
-# ϵ∂∂J (l2=6 c2=3 Rank 2)
-add_state!(db, :epsddJ, "ϵ∂∂J", 6, 3, 3, true)
-# ∂J' (l2=6 c2=3 Rank unknown)
-add_state!(db, :dJprime, "∂J'", 6, 3, 5, false)
+#add_state!(db, :dJ_mix, "∂J_mix", 6, 3, 2, true)
+add_state!(db, :epsddJ, "ϵ∂∂J", 6, 3, 3, true) #根据前者有3 4或3 5mixing; b一样
+#add_state!(db, :epsddJ_mix, "ϵ∂∂J_mix", 6, 3, 4, true)
+
 
 tms_cand = make_lambda_candidates()
-vecs_op = []
-bs_S, st_S = db.by_label[:S].bs, db.by_label[:S].st
-bs_dS, st_dS = db.by_label[:dS].bs, db.by_label[:dS].st
-for tms in tms_cand
-    op = Operator(bs_S, bs_dS, tms)
-    push!(vecs_op, op * st_S)
-end
-n_cand = length(tms_cand)
-M = zeros(ComplexF64, n_cand, n_cand)
-b = zeros(ComplexF64, n_cand)
-for i in 1:n_cand
-    b[i] = dot(vecs_op[i], st_dS)
-    for j in 1:n_cand
-        M[i,j] = dot(vecs_op[i], vecs_op[j])
+function calculate_coeffs(filename=coeffs_filename)
+    vecs_op = []
+    bs_S, st_S = db.by_label[:S].bs, db.by_label[:S].st
+    bs_dS, st_dS = db.by_label[:dS].bs, db.by_label[:dS].st
+    for tms in tms_cand
+        op = Operator(bs_S, bs_dS, tms)
+        push!(vecs_op, op * st_S)
     end
+    n_cand = length(tms_cand)
+    M = zeros(ComplexF64, n_cand, n_cand)
+    b = zeros(ComplexF64, n_cand)
+    for i in 1:n_cand
+        b[i] = dot(vecs_op[i], st_dS)
+        for j in 1:n_cand
+            M[i,j] = dot(vecs_op[i], vecs_op[j])
+        end
+    end
+    coeffs = pinv(M) * b
+    jldsave(filename; coeffs)
 end
-coeffs = pinv(M) * b
 
+coeffs_filename = joinpath(file_path, "coeffs_$(nm1).jld2")
+calculate_coeffs()
+coeffs = load(coeffs_filename)["coeffs"]
 #print_coefficients()
-
-# ==============================================================================
-# 阶段 4: 复现 Table IV
-# ==============================================================================
 
 tms_Lambdaz = SimplifyTerms(coeffs' * tms_cand)
 function remove_level_mixing(label_in, target, mix)
-    st_in, bs_in = db.by_label[label_in].st, db.by_label[label_in].bs
-    st_1, bs_1 = db.by_label[target].st, db.by_label[target].bs
-    st_2, bs_2 = db.by_label[mix].st, db.by_label[mix].bs
+    in_info, target_info, mix_info = db.by_label[label_in], db.by_label[target], db.by_label[mix]
+    st_in, bs_in = in_info.st, in_info.bs
+    st_1, bs_1 = target_info.st, target_info.bs
+    st_2, bs_2 = mix_info.st, mix_info.bs
     op = Operator(bs_in, bs_1, tms_Lambdaz)
     v = op * st_in
 
     c1 = dot(st_1, v)
     c2 = dot(st_2, v)
 
-    st_target_star = c1 .* st_1 .+ c2 .* st_2
-    normalize!(st_target_star)
-    st_mix_star = c2 .* st_1 .- c1 .* st_2
-    normalize!(st_mix_star)
-    return st_target_star, st_mix_star
+    target_info.st = normalize!(c1 .* st_1 .+ c2 .* st_2)
+    mix_info.st = normalize!(c2 .* st_1 .- c1 .* st_2)
+    
+    if !isnothing(target_info.st_o)
+        st_o_in = in_info.st_o
+        st_o_1 = target_info.st_o
+        st_o_2 = mix_info.st_o
+        op = Operator(bs0, bs0, tms_Lambdaz)
+        v_o = op * st_o_in
+
+        c1_o = dot(st_o_1, v_o)
+        c2_o = dot(st_o_2, v_o)
+    
+        target_info.st_o = normalize!(c1_o .* st_o_1 .+ c2_o .* st_o_2)
+        mix_info.st_o = normalize!(c2_o .* st_o_1 .- c1_o .* st_o_2)
+    end 
 end
 function project_state(st, op_l2, l_target, all_ls)
     st_out = copy(st)
@@ -407,62 +498,87 @@ function calc_row_sameang(label_in, l_input, l_target, targets_list)
     end
     @printf " %.4f |\n" total_ovlp
 end
-db.by_label[:ddS].st, db.by_label[:T].st = remove_level_mixing(:dS, :ddS, :T)
+
+# remove level mixing
+remove_level_mixing(:dS, :ddS, :T)
+#remove_level_mixing(:J, :dJ, :dJ_mix)
+#remove_level_mixing(:Sprime, :dSprime, :dSprime_mix)
+#remove_level_mixing(:curlJ, :epsddJ, :epsddJ_mix)
+#remove_level_mixing(:dJ, :boxJ, :Jprime)
 
 println("| Input  | l' | Target 1 Ovlp       | Target 2 Ovlp       | Total  |")
 println("|--------|----|---------------------|---------------------|--------|")
 
-# --- Row 1: S -> ∂S ---
-calc_row(:S, 0, 1, [:dS])
+tasks = [
+    # --- Row 1: S -> ∂S ---
+    () -> calc_row(:S, 0, 1, [:dS]),
 
-# --- Row 2: ∂S -> S, □S ---
-calc_row(:dS, 1, 0, [:S, :boxS])
+    # --- Row 2: ∂S -> S, □S ---
+    () -> calc_row(:dS, 1, 0, [:S, :boxS]),
 
-# --- Row 3: ∂S -> ∂∂S(*) ---
-calc_row(:dS, 1, 2, [:ddS])
+    # --- Row 3: ∂S -> ∂∂S(*) ---
+    () -> calc_row(:dS, 1, 2, [:ddS]),
 
-# --- Row 4: □S -> ∂S, □∂S ---
-calc_row(:boxS, 0, 1, [:dS, :boxdS])
+    # --- Row 4: □S -> ∂S, □∂S ---
+    () -> calc_row(:boxS, 0, 1, [:dS, :boxdS]),
 
-# --- Row 5: ∂∂S(*) -> ∂S, □∂S ---
-calc_row(:ddS, 2, 1, [:dS, :boxdS])
+    # --- Row 5: ∂∂S(*) -> ∂S, □∂S ---
+    () -> calc_row(:ddS, 2, 1, [:dS, :boxdS]),
 
-println("|--------|----|---------------------|---------------------|--------|")
+    () -> println("|--------|----|---------------------|---------------------|--------|"),
 
-# --- Row 6: S' -> ∂S' ---
-calc_row(:Sprime, 0, 1, [:dSprime])
+    # --- Row 6: S' -> ∂S' ---
+    () -> calc_row(:Sprime, 0, 1, [:dSprime]),
 
-println("|--------|----|---------------------|---------------------|--------|")
+    () -> println("|--------|----|---------------------|---------------------|--------|"),
     
-# --- Row 7: J -> ϵ∂J (same ang!) ---
-calc_row_sameang(:J, 1, 1, [:curlJ])
+    # --- Row 7: J -> ϵ∂J (same ang!) ---
+    () -> calc_row_sameang(:J, 1, 1, [:curlJ]),
 
-# --- Row 8: J -> ∂J ---
-calc_row(:J, 1, 2, [:dJ])
-    
-# --- Row 9: ∂J -> J, □J ---
-calc_row(:dJ, 2, 1, [:J, :boxJ])
-    
-# --- Row 10: ∂J -> ϵ∂∂J (same ang!) ---
-calc_row_sameang(:dJ, 2, 2, [:epsddJ])
-    
-# --- Row 11: ϵ∂J -> J, □J (same ang!) ---
-calc_row_sameang(:curlJ, 1, 1, [:J, :boxJ])
-    
-# --- Row 12: ϵ∂J -> ϵ∂∂J ---
-calc_row(:curlJ, 1, 2, [:epsddJ])
+    # --- Row 8: J -> ∂J ---
+    () -> calc_row(:J, 1, 2, [:dJ]),
+    #() -> calc_row(:J, 1, 0, [:O]),
+        
+    # --- Row 9: ∂J -> J, □J ---
+    () -> calc_row(:dJ, 2, 1, [:J, :boxJ]),
+        
+    # --- Row 10: ∂J -> ϵ∂∂J (same ang!) ---
+    () -> calc_row_sameang(:dJ, 2, 2, [:epsddJ]),
+        
+    # --- Row 11: ϵ∂J -> J, □J (same ang!) ---
+    () -> calc_row_sameang(:curlJ, 1, 1, [:J, :boxJ]),
+        
+    # --- Row 12: ϵ∂J -> ϵ∂∂J ---
+    () -> calc_row(:curlJ, 1, 2, [:epsddJ]),
 
-println("|--------|----|---------------------|---------------------|--------|")
+    () -> println("|--------|----|---------------------|---------------------|--------|"),
 
-# --- Row 13: J' -> ∂⋅J' ---
-calc_row(:Jprime, 1, 0, [:divJprime])
-    
-# --- Row 14: J' -> ϵ∂J' (same ang!) ---
-calc_row_sameang(:Jprime, 1, 1, [:curlJprime])
-    
-# --- Row 15: J' -> ∂J' ---
-calc_row(:Jprime, 1, 2, [:dJprime])
-    
+    # --- Row 13: J' -> ∂⋅J' ---
+    () -> calc_row(:Jprime, 1, 0, [:divJprime]),
+        
+    # --- Row 14: J' -> ϵ∂J' (same ang!) ---
+    () -> calc_row_sameang(:Jprime, 1, 1, [:curlJprime]),
+        
+    # --- Row 15: J' -> ∂J' ---
+    () -> calc_row(:Jprime, 1, 2, [:dJprime]),
+
+    () -> println("|--------|----|---------------------|---------------------|--------|"),
+
+    # --- Row 16: O -> ∂O ---
+    () -> calc_row(:O, 0, 1, [:dO]),
+
+    # --- Row 17: ∂O -> O, □O ---
+    () -> calc_row(:dO, 1, 0, [:O, :boxO]),
+
+    # --- Row 18: ∂O -> ∂∂O ---
+    () -> calc_row(:dO, 1, 2, [:ddO]),
+]
+
+run_indices = []
+indices_to_run = isempty(run_indices) ? (1:length(tasks)) : run_indices
+for i in indices_to_run
+    tasks[i]()
+end
 println("|--------|----|---------------------|---------------------|--------|")
 
 function check_current_conservation()
@@ -484,4 +600,59 @@ function check_tensor_conservation()
 end
 check_current_conservation()
 check_tensor_conservation()
-print_full_spectrum()
+# print_full_spectrum()
+# test_capacity()
+#@info test_adjoint_scalar()
+function check_current_conservation_withO()
+    info_J = db.by_label[:J]
+    info_O = db.by_label[:O]
+    bs_J, st_J = info_J.bs, info_J.st
+    bs_O, st_O = info_O.bs, info_O.st
+    
+    op = Operator(bs_J, bs_O, tms_Lambdaz)
+    v = op * st_J
+    v_proj = project_state(v, Operator(bs_O, bs_O, P.tms_l2), 0, get_possible_ls(1))
+    
+    norm_total = Real(dot(v, v))
+    norm_l0 = Real(dot(v_proj, v_proj))
+    
+    println("=== 守恒流有限尺寸误差与 O 态 Mixing 分析 ===")
+    @printf "1. 原始守恒律误差 (Norm of l=0 / Total Norm): %.6f\n" (norm_l0 / norm_total)
+    
+    overlap = dot(st_O, v_proj)
+    norm_O = dot(st_O, st_O)
+    weight_O = abs2(overlap) / (norm_O * norm_l0)
+    @printf "2. 误差向量中 O 态的成分占比: %.2f%%\n" (weight_O * 100)
+    
+    v_clean = v_proj .- (overlap / norm_O) .* st_O
+    norm_clean = Real(dot(v_clean, v_clean))
+    
+    @printf "3. 剔除 O 态混合后的纯净误差 (Clean Norm / Total Norm): %.6f\n" (norm_clean / norm_total)
+    println("==================================================")
+end
+check_current_conservation_withO()
+function check_generator_components()
+    info_J = db.by_label[:J]
+    st_J, bs_J = info_J.st, info_J.bs
+    
+    bs_tgt = db.by_label[:O].bs 
+    op = Operator(bs_J, bs_tgt, tms_Lambdaz)
+    op_L2 = Operator(bs_tgt, bs_tgt, P.tms_l2)
+    
+    v = op * st_J
+    norm_total_sq = Real(dot(v, v))
+    @printf "原始向量ΛJ总模长平方: %.6e\n" norm_total_sq
+    
+    all_ls = [0, 1, 2]
+    v_l0 = project_state(v, op_L2, 0, all_ls)
+    norm_l0_sq = Real(dot(v_l0, v_l0))
+    ratio_l0 = norm_l0_sq / norm_total_sq
+    @printf "l=0 分量模长平方: %.6e  占比: %.4f%%\n" norm_l0_sq (ratio_l0 * 100)
+    
+    # 4. 投影到 l=2 扇区 (合法的物理后代态部分)
+    v_l2 = project_state(v, op_L2, 2, all_ls)
+    norm_l2_sq = Real(dot(v_l2, v_l2))
+    ratio_l2 = norm_l2_sq / norm_total_sq
+    @printf "l=2 分量模长平方: %.6e  占比: %.4f%%\n" norm_l2_sq (ratio_l2 * 100)
+end
+check_generator_components()

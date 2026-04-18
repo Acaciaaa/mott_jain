@@ -69,7 +69,7 @@ function build_model(; nm1::Int)
     ]
     cfs = Dict{Int64, Confs}()
     for Sz = 0 : 1
-        cfs[Sz] = Confs(no, [no1, 0, 0, 6Sz], qnd) 
+        cfs[Sz] = Confs(no, [no1, 0, 2Sz, 0], qnd) 
     end
 
     f0 = PadSphereObs(GetElectronObs(nm0, 1, 1), no1)
@@ -105,48 +105,51 @@ end
 function make_tms_hmt(
     P::ModelParams,
     μ::Float64,
-    U0::Union{Float64,AbstractVector{<:Real}} = 0.5,
-    V1::Float64 = 1.0,
+    U::Union{Float64,AbstractVector{<:Real}} = 0.5,
+    V::Union{Float64,AbstractVector{<:Real}} = 0.5, 
     t::Float64 = 0.8,)
-    other_terms = V1 * P.tms_V1 - t * (P.tms_hop + P.tms_hop') + μ * P.tms_f123
-    if U0 isa Float64
-        return SimplifyTerms(U0 * P.tms_int + other_terms)
+    other_terms = - t * (P.tms_hop + P.tms_hop') + μ * P.tms_f123
+    if U isa Float64
+        return SimplifyTerms(U * P.tms_int + V * P.tms_V1 + other_terms)
     else
-        Uf, Uf0, U0 = Float64.(U0)
+        Uf, Uf0, U0 = Float64.(U)
+        Vf, Vf0, V0 = Float64.(V)
         return SimplifyTerms(
             Uf * SimplifyTerms(GetIntegral(P.nf * P.nf)) +
             Uf0 * SimplifyTerms(GetIntegral(P.nf * P.n0)) +
-            U0 * SimplifyTerms(GetIntegral(P.n0 * P.n0)) +
+            U0 * SimplifyTerms(GetIntegral(P.n0 * P.n0)) + 
+            Vf * SimplifyTerms(GetIntegral(P.nf * Laplacian(P.nf))) +
+            Vf0 * SimplifyTerms(GetIntegral(P.n0 * Laplacian(P.nf))) +
+            V0 * P.tms_V1 +
             other_terms
         )
     end
 end
 
-function ground_state(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=1;
-                            check_hermiticity::Bool=true,
-                            tol_rel::Float64=1e-12,
-                            symmetrize::Bool=true)
-    tms_hmt = make_tms_hmt(P, μ, U0, V1, t)
-    bestE = Inf; bestst = nothing; bestbs = nothing; bestR = 0; bestZ = 0
-    for Z in (1,-1), R in (-1,1)
+function basic_solution(P::ModelParams, hmt_terms, k)
+    results = []
+    for Z in (1, -1), R in (1, -1) 
         bs = Basis(P.cfs[0], [Z, R], P.qnf)
-        hmt_mat = OpMat(Operator(bs, tms_hmt))
-        vals, vecs = GetEigensystem(hmt_mat, k)
-
-        if vals[1] < bestE
-            bestE, bestst, bestbs, bestR, bestZ = vals[1], vecs[:,1], bs, R, Z
-        end
-    end
-
-    return bestst, bestbs, bestE, bestR, bestZ
+        hmt_mat = OpMat(Operator(bs, hmt_terms))
+        enrg, st = GetEigensystem(hmt_mat, k)
+        l2_mat = OpMat(Operator(bs, P.tms_l2)) 
+        c2_mat = OpMat(Operator(bs, P.tms_c2)) 
+        l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
+        c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
+        for i in eachindex(enrg) 
+            push!(results, [enrg[i], l2_val[i], c2_val[i]])
+        end 
+    end 
+    sort!(results, by = r -> real(r[1]))
+    return results
 end
 
-function lowest_k_states(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=30)
+function lowest_k_states(P::ModelParams, μ::Float64, U, V, t::Float64=0.8, k::Int=30)
     results = []
     #for Sz in 0:1, Z in (1, -1), R in (1, -1) 
     for Sz in (0), Z in (1, -1), R in (1, -1) 
         bs = Basis(P.cfs[Sz], [Z, R], P.qnf)
-        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
+        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U, V, t)))
         n = hmt_mat.dimd
         
         if n == 0
@@ -177,12 +180,12 @@ function lowest_k_states(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Fl
     return results
 end
 
-function for_generator(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=10)
+function for_generator(P::ModelParams, μ::Float64, U, V, t::Float64=0.8, k::Int=10)
     results = []
     bss = Dict{Vector{Int64}, Basis}()
     for Sz in (0), Z in (1, -1), R in (1, -1) 
         bs = Basis(P.cfs[Sz], [Z, R], P.qnf)
-        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
+        hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U, V, t)))
         n = hmt_mat.dimd
         
         if n == 0
@@ -205,20 +208,22 @@ function for_generator(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Floa
         l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
         c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
         bss[[Sz, Z, R]] = bs
-        for i in eachindex(enrg) 
-            push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i], Sz, Z, R])
+        for i in eachindex(enrg)
+            if l2_val[i] < 7
+                push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i], Sz, Z, R])
+            end
         end 
     end 
     sort!(results, by = st -> real(st[1]))
     return results, bss
 end
 
-function for_generator_special(P::ModelParams, μ::Float64, U0, V1::Float64=1.0, t::Float64=0.8, k::Int=10)
+function for_generator_special(P::ModelParams, μ::Float64, U, V, t::Float64=0.8, k::Int=10)
     results = []
     bs = Basis(Confs(P.no, [P.no1, 0, 2, 0], P.qnd))
     bs_plus = Basis(Confs(P.no, [P.no1, 2, 2, 0], P.qnd))
     bs_minus = Basis(Confs(P.no, [P.no1, -2, 2, 0], P.qnd))
-    hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U0, V1, t)))
+    hmt_mat = OpMat(Operator(bs, PADsu3.make_tms_hmt(P, μ, U, V, t)))
     n = hmt_mat.dimd
         
     if n == 1
@@ -239,8 +244,10 @@ function for_generator_special(P::ModelParams, μ::Float64, U0, V1::Float64=1.0,
     l2_val = [real(st[:, i]' * l2_mat * st[:, i]) for i in eachindex(enrg)] 
     c2_val = [real(st[:, i]' * c2_mat * st[:, i]) for i in eachindex(enrg)]
     
-    for i in eachindex(enrg) 
-        push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i]])
+    for i in eachindex(enrg)
+        if l2_val[i] < 7
+            push!(results, [enrg[i], st[:,i], l2_val[i], c2_val[i]])
+        end
     end 
     
     sort!(results, by = st -> real(st[1]))
@@ -249,13 +256,13 @@ end
 
 using JLD2, Dates
 
-function write_results(P::ModelParams, mus, U0, V1::Float64=1.0, t::Float64=0.8,
+function write_results(P::ModelParams, mus, U, V, t::Float64=0.8,
                         k::Int=30, path::AbstractString = "data/results_$(P.nm1).jld2")
     mkpath(dirname(path))
     mus_vec = collect(round.(Float64.(mus); digits=4))
     results_vec = Vector{Vector{Vector{Float64}}}(undef, length(mus_vec))
     for (i, μ) in enumerate(mus_vec)
-        results_vec[i] = lowest_k_states(P, μ, U0, V1, t,k)
+        results_vec[i] = lowest_k_states(P, μ, U, V, t,k)
     end
     meta = Dict{String,Any}("nml"=>P.nm1, "k"=>k, "count_mu"=>length(mus_vec), "updated_at"=>string(Dates.now()))
     @save path mus=mus_vec results=results_vec meta

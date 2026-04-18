@@ -9,15 +9,17 @@ using SpecialFunctions
 using CairoMakie
 using Printf
 
-μc = 0.1156
-nm1 = 5
+coef = [[1.202, 5.135, 10.818],[0.0, 0.744, 6.688],0.5]
+nm1 = 6
+μc=-0.6
+factor = 0.108
 
 function su3()
-    mus, results_vec = PADsu3.read_results(nm1,"data/results_$(nm1).jld2")
+    # mus, results_vec = PADsu3.read_results(nm1,"data/results_$(nm1).jld2")
     #mus, results_vec = PADsu3.read_results(nm1,"critical_point/results_$(nm1).jld2")
-    idx = argmin(abs.(mus .- μc)); val = mus[idx]; results = results_vec[idx]
-    #P = PADsu3.build_model(nm1=nm1)
-    #results = PADsu3.lowest_k_states(P, μc,0.4,1.0,0.3, 10)
+    # idx = argmin(abs.(mus .- μc)); val = mus[idx]; results = results_vec[idx]
+    P = PADsu3.build_model(nm1=nm1)
+    results = PADsu3.lowest_k_states(P, μc,coef[1],coef[2],coef[3], 20)
     #@printf("%.7f", val)
     #@info results
     E0 = results[1][1]
@@ -33,14 +35,8 @@ function su3()
         ]
     #@info [mu;enrg_cal]
     dim_cal = Float64[1, 2, 3, 3, 3]
-    factor = (enrg_cal' * dim_cal) / (dim_cal' * dim_cal)
+    #factor = (enrg_cal' * dim_cal) / (dim_cal' * dim_cal)
     @info factor
-    
-    #P = PADsu3.build_model(nm1=nm1)
-    #results_ = PADsu3.lowest_k_states_adjoint(P, μc,0.4,0.9,0.7, 7)
-    # @info results
-    #ratio = (filter(st -> st[2] ≈ 0 && st[3] ≈ 3, results_)[1][1]-E0)/(filter(st -> st[2] ≈ 2 && st[3] ≈ 3, results_)[1][1]-E0)
-    #@info ratio
     
     tol = 1e-2
     to_l(L2) = (sqrt(1 + 4L2) - 1) / 2
@@ -50,7 +46,6 @@ function su3()
          C2 = st[3])
         for st in results if (st[2] < 21 && st[3] < 9)
     ]
-    #@info filtered_dim
     
     colors = Dict(0.0=>:red, 3.0=>:blue, 6.0=>:green, 8.0=>:purple)
     labels = Dict(0.0=>"C₂=0", 3.0=>"C₂=3", 6.0=>"C₂=6", 8.0=>"C₂=8")
@@ -64,14 +59,16 @@ function su3()
     )
     
     ax.xticks = 0:1:4
-    xlims!(ax, -0.3, 4.3)
+    CairoMakie.xlims!(ax, -0.3, 4.3)
     ax.yticks = 0:1:5
-    ylims!(ax, -0.3, 5.3)
+    CairoMakie.ylims!(ax, -0.3, 5.3)
     
     for st in filtered_dim
+        #if st.C2 ≈ 8
         c = get(colors, st.C2, :gray)
         lines!(ax, [st.l - dx, st.l + dx], [st.Δ, st.Δ]; color=c, linewidth=2)
         scatter!(ax, [st.l], [st.Δ]; color=c, markersize=10)
+        #end
     end
     
     for (c2, name) in labels
@@ -80,9 +77,9 @@ function su3()
     
     
     axislegend(ax, position=:rb, framevisible=false)
-    fig
+    #fig
     #save("/Users/ruiqi/Documents/tmp/mott_jain/scaling_dimension_$(nm1).png", fig)
-    #save("/Users/ruiqi/Desktop/$(nm1)_k30.png", fig)
+    save("/Users/ruiqi/Desktop/$(nm1)_k20.png", fig)
     
 end
 
